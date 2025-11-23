@@ -1,6 +1,6 @@
 find_package(
   Python3
-  COMPONENTS Interpreter Development
+  COMPONENTS Interpreter Development.Module
   REQUIRED)
 find_package(pybind11 CONFIG REQUIRED)
 
