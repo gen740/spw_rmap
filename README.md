@@ -135,10 +135,10 @@ write_future.get().value();
 from pyspw_rmap import _core as spw
 
 node = spw.SpwRmapTCPNode("127.0.0.1", "10030")
-node.start()  # connects and launches runLoop internally
+node.connect()  # opens the TCP connection; no worker thread is spawned
 ```
 
-Call `node.stop()` to shut down and join the worker thread. Manual polling isn’t exposed in Python; launch `start()` once and let the worker handle replies.
+The bindings now run in an auto-polling mode, so there is no `start()`/`stop()` pair or internal polling thread. Once connected, synchronous `read`/`write` calls send a command and block until the reply is parsed (or a timeout/error occurs).
 
 ### Creating target node
 
@@ -156,15 +156,15 @@ target.reply_address = [9, 11, 13, 0]
 node.write(target, 0x20000000, [0x12, 0x34, 0x56, 0x78])
 data = node.read(target, 0x20000000, 4)
 print("sync read:", list(data))
+```
 
-node.stop()
+Destroy the `SpwRmapTCPNode` instance (or let it go out of scope) when you are done—the underlying socket is closed automatically.
 
 ## Timeouts and Error Handling
 
 - `write` / `read` accept a `timeout` (default 100 ms) and a `retry_count`. When the timeout expires the pending transaction is cancelled internally, its transaction ID is released, and the call returns `std::errc::timed_out`. This prevents deadlocks when a remote node never replies.
 
 - Asynchronous APIs propagate callback failures: if the function you pass to `writeAsync` / `readAsync` throws, the exception is caught by the library, the transaction is cancelled, and the returned `std::future` resolves to `std::errc::operation_canceled`. This keeps the polling loop alive and makes the failure visible to the caller. Catch exceptions inside your callback if you want to mark the operation successful despite local errors.
-```
 
 Python bindings currently offer only synchronous `read`/`write` methods. To parallelize operations you must call them from your own threads or processes; there is no built-in async wrapper.
 
