@@ -37,6 +37,7 @@
                 ++ (with final; [
                   cmake
                   ninja
+                  gtest
                 ]);
               pythonImportsCheck = [ "pyspw_rmap" ];
               dontUseCmakeConfigure = true;
