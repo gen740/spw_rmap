@@ -6,8 +6,14 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(SPWRMAP_BUILD_APPS "Build command line applications" ON)
 option(SPWRMAP_BUILD_EXAMPLES "Build examples" OFF)
 option(SPWRMAP_BUILD_TESTS "Build tests" OFF)
+option(SPWRMAP_ENABLE_DEBUG_LOGS "Enable debug logging helpers" OFF)
 
 add_library(${PROJECT_NAME} STATIC)
+if(SPWRMAP_ENABLE_DEBUG_LOGS)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC SPW_RMAP_DEBUG=1)
+else()
+  target_compile_definitions(${PROJECT_NAME} PUBLIC SPW_RMAP_DEBUG=0)
+endif()
 
 add_subdirectory(src)
 

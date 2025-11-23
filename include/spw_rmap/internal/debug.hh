@@ -1,7 +1,11 @@
 #include <iostream>
 #include <source_location>
 
-constexpr int DEBUG = 1;
+#ifndef SPW_RMAP_DEBUG
+#define SPW_RMAP_DEBUG 0
+#endif
+
+constexpr bool DEBUG = static_cast<bool>(SPW_RMAP_DEBUG);
 
 namespace spw_rmap::debug {
 
