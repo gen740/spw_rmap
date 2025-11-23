@@ -29,8 +29,28 @@ jobs:
             build_sdist: false
     env:
       CMAKE_ARGS: -DSPWRMAP_BUILD_TESTS=OFF
+      TEST_PYPI_VERSION_SUFFIX: ${{ github.run_number }}.${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set unique TestPyPI version
+        run: |
+          python3 - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          suffix = os.environ["TEST_PYPI_VERSION_SUFFIX"]
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text()
+          original = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
+          if not original:
+            raise SystemExit("Unable to find version in pyproject.toml")
+          base = original.group(1).split("+", 1)[0]
+          base = base.split(".dev", 1)[0]
+          new_version = f'{base}.dev{suffix}'
+          updated = text[:original.start(1)] + new_version + text[original.end(1):]
+          path.write_text(updated)
+          PY
       - id: setup-python
         uses: actions/setup-python@v5
         with:
