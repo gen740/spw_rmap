@@ -187,7 +187,7 @@ auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
   tv.tv_sec = tv_sec;
   tv.tv_usec = tv_usec;
 
-  if (::setsockopt(client_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+  if (::setsockopt(client_fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
     spw_rmap::debug::debug("Failed to set send timeout");
     return std::unexpected{std::error_code(errno, std::system_category())};
   }
@@ -208,8 +208,8 @@ auto TCPServer::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
   tv.tv_sec = tv_sec;
   tv.tv_usec = tv_usec;
 
-  if (::setsockopt(client_fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
-    spw_rmap::debug::debug("Failed to set send timeout");
+  if (::setsockopt(client_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+    spw_rmap::debug::debug("Failed to set receive timeout");
     return std::unexpected{std::error_code(errno, std::system_category())};
   }
   return {};
