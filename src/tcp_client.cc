@@ -127,6 +127,18 @@ static auto set_sockopts(int fd) noexcept
     return std::unexpected{std::error_code(errno, std::system_category())};
   }
 #endif
+  int send_buf_size = 2048;
+  if (::setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &send_buf_size,
+                   sizeof(send_buf_size)) != 0) {
+    spw_rmap::debug::debug("Failed to set SO_SNDBUF");
+    return std::unexpected{std::error_code(errno, std::system_category())};
+  }
+  int recv_buf_size = 32768;
+  if (::setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &recv_buf_size,
+                   sizeof(recv_buf_size)) != 0) {
+    spw_rmap::debug::debug("Failed to set SO_RCVBUF");
+    return std::unexpected{std::error_code(errno, std::system_category())};
+  }
   const int fdflags = ::fcntl(fd, F_GETFD);
   if (fdflags < 0 || ::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) {
     spw_rmap::debug::debug("Failed to set FD_CLOEXEC");
