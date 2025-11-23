@@ -40,6 +40,9 @@ jobs:
           import re
 
           suffix = os.environ["TEST_PYPI_VERSION_SUFFIX"]
+          run_number, run_attempt = suffix.split(".")
+          unique_dev = int(run_number) * 100 + int(run_attempt)
+
           path = pathlib.Path("pyproject.toml")
           text = path.read_text()
           original = re.search(r'(?m)^version\s*=\s*"([^"]+)"', text)
@@ -47,7 +50,7 @@ jobs:
             raise SystemExit("Unable to find version in pyproject.toml")
           base = original.group(1).split("+", 1)[0]
           base = base.split(".dev", 1)[0]
-          new_version = f'{base}.dev{suffix}'
+          new_version = f'{base}.dev{unique_dev}'
           updated = text[:original.start(1)] + new_version + text[original.end(1):]
           path.write_text(updated)
           PY
