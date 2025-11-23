@@ -13,6 +13,10 @@ description = "spw_rmap with python bindings"
 requires-python = ">=3.9"
 license = { text = "MIT" }
 
+[project.scripts]
+spwrmap = "pyspw_rmap._cli:spwrmap"
+spwrmap_speedtest = "pyspw_rmap._cli:spwrmap_speedtest"
+
 [tool.scikit-build]
 cmake.source-dir = "."
 cmake.args = ["-DSPWRMAP_BUILD_PYTHON_BINDINGS=ON"]
