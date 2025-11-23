@@ -16,6 +16,8 @@ jobs:
   publish-testpypi:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    env:
+      CMAKE_ARGS: -DSPWRMAP_BUILD_TESTS=OFF
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,10 +34,13 @@ jobs:
         with:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
 
   publish-pypi:
     if: github.event_name == 'release'
     runs-on: ubuntu-latest
+    env:
+      CMAKE_ARGS: -DSPWRMAP_BUILD_TESTS=OFF
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
