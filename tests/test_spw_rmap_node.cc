@@ -39,6 +39,11 @@ class MockBackend {
     return std::monostate{};
   }
 
+  auto setReceiveTimeout(std::chrono::microseconds /*timeout*/) noexcept
+      -> std::expected<std::monostate, std::error_code> {
+    return std::monostate{};
+  }
+
   auto sendAll(std::span<const uint8_t> data) noexcept
       -> std::expected<std::monostate, std::error_code> {
     sent_frames_.emplace_back(data.begin(), data.end());
@@ -56,8 +61,8 @@ class MockBackend {
       return std::unexpected{
           std::make_error_code(std::errc::operation_canceled)};
     }
-    const auto count =
-        std::min(buffer.size(), static_cast<std::size_t>(incoming_bytes_.size()));
+    const auto count = std::min(
+        buffer.size(), static_cast<std::size_t>(incoming_bytes_.size()));
     for (std::size_t i = 0; i < count; ++i) {
       buffer[i] = incoming_bytes_.front();
       incoming_bytes_.pop_front();
@@ -65,8 +70,7 @@ class MockBackend {
     return count;
   }
 
-  auto shutdown() noexcept
-      -> std::expected<std::monostate, std::error_code> {
+  auto shutdown() noexcept -> std::expected<std::monostate, std::error_code> {
     {
       std::lock_guard<std::mutex> lock(mtx_);
       shutdown_ = true;
@@ -98,17 +102,16 @@ class MockBackend {
   }
 
  private:
-    std::string ip_address_;
-    std::string port_;
-    std::vector<std::vector<uint8_t>> sent_frames_;
-    std::deque<uint8_t> incoming_bytes_;
-    std::mutex mtx_;
-    std::condition_variable cv_;
-    bool shutdown_ = false;
+  std::string ip_address_;
+  std::string port_;
+  std::vector<std::vector<uint8_t>> sent_frames_;
+  std::deque<uint8_t> incoming_bytes_;
+  std::mutex mtx_;
+  std::condition_variable cv_;
+  bool shutdown_ = false;
 };
 
-class TestNode
-    : public spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend> {
+class TestNode : public spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend> {
   using Base = spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend>;
 
  public:
@@ -134,8 +137,7 @@ class TestNode
   auto backend() -> MockBackend& { return *getBackend_(); }
 };
 
-auto makeFrame(std::span<const uint8_t> payload)
-    -> std::vector<uint8_t> {
+auto makeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
   std::vector<uint8_t> frame(12 + payload.size());
   frame[0] = 0x00;
   frame[1] = 0x00;
@@ -154,8 +156,7 @@ auto makeFrame(std::span<const uint8_t> payload)
   return frame;
 }
 
-auto buildWriteReplyFrame(uint16_t transaction_id)
-    -> std::vector<uint8_t> {
+auto buildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
   spw_rmap::WriteReplyPacketBuilder builder;
   auto reply_addr = std::array<uint8_t, 1>{0x01};
   auto config = spw_rmap::WriteReplyPacketConfig{
@@ -182,8 +183,7 @@ auto makeNodeConfig() -> spw_rmap::SpwRmapTCPNodeConfig {
   return config;
 }
 
-auto makeTargetNode()
-    -> std::shared_ptr<spw_rmap::TargetNodeBase> {
+auto makeTargetNode() -> std::shared_ptr<spw_rmap::TargetNodeBase> {
   std::vector<uint8_t> target_addr{0x20, 0x30};
   std::vector<uint8_t> reply_addr{0x10, 0x11};
   return std::make_shared<spw_rmap::TargetNodeDynamic>(
@@ -220,8 +220,8 @@ TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
   auto target_node = makeTargetNode();
   std::array<uint8_t, 2> payload{0x01, 0x02};
 
-  auto timeout_result = node.write(target_node, 0x2000, payload,
-                                   std::chrono::milliseconds(1), 1);
+  auto timeout_result =
+      node.write(target_node, 0x2000, payload, std::chrono::milliseconds(1), 1);
   ASSERT_FALSE(timeout_result.has_value());
   EXPECT_EQ(timeout_result.error(), std::make_error_code(std::errc::timed_out));
 

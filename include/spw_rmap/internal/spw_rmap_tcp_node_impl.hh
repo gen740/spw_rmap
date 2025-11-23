@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See LICENSE file for details.
 #pragma once
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -19,6 +20,8 @@
 #include "spw_rmap/spw_rmap_node_base.hh"
 
 namespace spw_rmap {
+
+using namespace std::chrono_literals;
 
 enum class BufferPolicy : uint8_t {
   Fixed,       // Fixed size
@@ -90,6 +93,11 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   std::function<void(Packet)> on_write_callback_ = nullptr;
   std::function<std::vector<uint8_t>(Packet)> on_read_callback_ = nullptr;
+
+  std::condition_variable poll_cv_;
+  std::atomic<bool> auto_polling_mode_{false};
+  std::atomic<bool> receiving_{false};
+  std::mutex auto_poll_mtx_;
 
  public:
   explicit SpwRmapTCPNodeImpl(SpwRmapTCPNodeConfig config) noexcept
@@ -254,7 +262,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         try {
           on_complete(packet);
         } catch (const std::exception& e) {
-          spw_rmap::debug::debug("Exception in writeAsync callback: ", e.what());
+          spw_rmap::debug::debug("Exception in writeAsync callback: ",
+                                 e.what());
           promise->set_value(std::unexpected{
               std::make_error_code(std::errc::operation_canceled)});
           releaseTransactionID_(transaction_id);
@@ -687,7 +696,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   virtual auto isShutdowned() noexcept -> bool = 0;
 
   auto poll() noexcept -> std::expected<bool, std::error_code> override {
+    receiving_ = true;
+    poll_cv_.notify_one();
     auto res = recvAndParseOnePacket_();
+    receiving_ = false;
     if (!res.has_value()) {
       if (isShutdowned()) {
         return false;
@@ -876,6 +888,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     transaction_timeout_ = timeout;
   }
 
+  auto setAutoPollingMode(bool enable) noexcept -> void {
+    auto_polling_mode_ = enable;
+  }
+
   auto write(std::shared_ptr<TargetNodeBase> target_node,
              uint32_t memory_address, const std::span<const uint8_t> data,
              std::chrono::milliseconds timeout = std::chrono::milliseconds{100},
@@ -883,21 +899,46 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       -> std::expected<std::monostate, std::error_code> override {
     retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
-    for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-      auto async_op =
-          startWriteAsyncOperation_(target_node, memory_address, data,
-                                    [](const Packet&) noexcept -> void {});
-      if (async_op.future.wait_for(timeout) == std::future_status::ready) {
-        auto res = async_op.future.get();
-        if (!res.has_value()) {
-          return std::unexpected{res.error()};
+    if (auto_polling_mode_) {
+      auto res = tcp_backend_->setReceiveTimeout(timeout);
+      if (!res.has_value()) {
+        return std::unexpected{res.error()};
+      }
+      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
+        auto async_op =
+            startWriteAsyncOperation_(target_node, memory_address, data,
+                                      [](const Packet&) noexcept -> void {});
+        auto res = poll();
+        if (res && async_op.future.wait_for(0ms) == std::future_status::ready) {
+          auto res = async_op.future.get();
+          if (!res.has_value()) {
+            return std::unexpected{res.error()};
+          }
+          return {};
+        } else {
+          if (async_op.transaction_id.has_value()) {
+            cancelTransaction_(*async_op.transaction_id);
+          }
+          last_error = std::make_error_code(std::errc::timed_out);
         }
-        return {};
       }
-      if (async_op.transaction_id.has_value()) {
-        cancelTransaction_(*async_op.transaction_id);
+    } else {
+      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
+        auto async_op =
+            startWriteAsyncOperation_(target_node, memory_address, data,
+                                      [](const Packet&) noexcept -> void {});
+        if (async_op.future.wait_for(timeout) == std::future_status::ready) {
+          auto res = async_op.future.get();
+          if (!res.has_value()) {
+            return std::unexpected{res.error()};
+          }
+          return {};
+        }
+        if (async_op.transaction_id.has_value()) {
+          cancelTransaction_(*async_op.transaction_id);
+        }
+        last_error = std::make_error_code(std::errc::timed_out);
       }
-      last_error = std::make_error_code(std::errc::timed_out);
     }
     return std::unexpected{last_error};
   }
@@ -906,6 +947,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   uint32_t memory_address, const std::span<const uint8_t> data,
                   std::function<void(Packet)> on_complete) noexcept
       -> std::future<std::expected<std::monostate, std::error_code>> override {
+    if (auto_polling_mode_) {
+      std::promise<std::expected<std::monostate, std::error_code>> prom;
+      auto fut = prom.get_future();
+      prom.set_value(std::unexpected{
+          std::make_error_code(std::errc::operation_not_permitted)});
+      return fut;
+    }
     auto async_op = startWriteAsyncOperation_(
         std::move(target_node), memory_address, data, std::move(on_complete));
     return std::move(async_op.future);
@@ -918,23 +966,50 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       -> std::expected<std::monostate, std::error_code> override {
     retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
-    for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-      auto async_op = startReadAsyncOperation_(
-          target_node, memory_address, data.size(),
-          [data](const Packet& packet) noexcept -> void {
-            std::copy_n(packet.data.data(), data.size(), data.data());
-          });
-      if (async_op.future.wait_for(timeout) == std::future_status::ready) {
-        auto res = async_op.future.get();
-        if (!res.has_value()) {
-          return std::unexpected{res.error()};
+    if (auto_polling_mode_) {
+      auto res = tcp_backend_->setReceiveTimeout(timeout);
+      if (!res.has_value()) {
+        return std::unexpected{res.error()};
+      }
+      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
+        auto async_op = startReadAsyncOperation_(
+            target_node, memory_address, data.size(),
+            [data](const Packet& packet) noexcept -> void {
+              std::copy_n(packet.data.data(), data.size(), data.data());
+            });
+        auto res = poll();
+        if (res && async_op.future.wait_for(0ms) == std::future_status::ready) {
+          auto res = async_op.future.get();
+          if (!res.has_value()) {
+            return std::unexpected{res.error()};
+          }
+          return {};
+        } else {
+          if (async_op.transaction_id.has_value()) {
+            cancelTransaction_(*async_op.transaction_id);
+          }
+          last_error = std::make_error_code(std::errc::timed_out);
         }
-        return {};
       }
-      if (async_op.transaction_id.has_value()) {
-        cancelTransaction_(*async_op.transaction_id);
+    } else {
+      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
+        auto async_op = startReadAsyncOperation_(
+            target_node, memory_address, data.size(),
+            [data](const Packet& packet) noexcept -> void {
+              std::copy_n(packet.data.data(), data.size(), data.data());
+            });
+        if (async_op.future.wait_for(timeout) == std::future_status::ready) {
+          auto res = async_op.future.get();
+          if (!res.has_value()) {
+            return std::unexpected{res.error()};
+          }
+          return {};
+        }
+        if (async_op.transaction_id.has_value()) {
+          cancelTransaction_(*async_op.transaction_id);
+        }
+        last_error = std::make_error_code(std::errc::timed_out);
       }
-      last_error = std::make_error_code(std::errc::timed_out);
     }
     return std::unexpected{last_error};
   }
@@ -943,6 +1018,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                  uint32_t memory_address, uint32_t data_length,
                  std::function<void(Packet)> on_complete) noexcept
       -> std::future<std::expected<std::monostate, std::error_code>> override {
+    if (auto_polling_mode_) {
+      std::promise<std::expected<std::monostate, std::error_code>> prom;
+      auto fut = prom.get_future();
+      prom.set_value(std::unexpected{
+          std::make_error_code(std::errc::operation_not_permitted)});
+      return fut;
+    }
     auto async_op =
         startReadAsyncOperation_(std::move(target_node), memory_address,
                                  data_length, std::move(on_complete));

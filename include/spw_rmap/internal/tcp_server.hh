@@ -48,6 +48,10 @@ class TCPServer {
   [[nodiscard]] auto setSendTimeout(std::chrono::microseconds timeout) noexcept
       -> std::expected<std::monostate, std::error_code>;
 
+  [[nodiscard]] auto setReceiveTimeout(
+      std::chrono::microseconds timeout) noexcept
+      -> std::expected<std::monostate, std::error_code>;
+
   [[nodiscard]] auto sendAll(std::span<const uint8_t> data) noexcept
       -> std::expected<std::monostate, std::error_code>;
 

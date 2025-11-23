@@ -374,8 +374,7 @@ auto main(int argc, char** argv) -> int {
     }
 
     const auto elapsed =
-        std::chrono::duration<double, std::nano>(end_time - start_time)
-            .count();
+        std::chrono::duration<double, std::nano>(end_time - start_time).count();
     latencies_us.push_back(elapsed);
     updateProgress(iter + 1, ntimes);
   }
