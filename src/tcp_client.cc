@@ -235,6 +235,25 @@ auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
   return {};
 }
 
+auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
+    -> std::expected<std::monostate, std::error_code> {
+  if (timeout < std::chrono::microseconds::zero()) {
+    spw_rmap::debug::debug("Negative timeout value");
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  const auto tv_sec = static_cast<time_t>(
+      std::chrono::duration_cast<std::chrono::seconds>(timeout).count());
+  const auto tv_usec = static_cast<suseconds_t>(timeout.count() % 1'000'000);
+  timeval tv{};
+  tv.tv_sec = tv_sec;
+  tv.tv_usec = tv_usec;
+  if (::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+    spw_rmap::debug::debug("Failed to set receive timeout");
+    return std::unexpected{std::error_code(errno, std::system_category())};
+  }
+  return {};
+}
+
 auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
     -> std::expected<std::monostate, std::error_code> {
   if (fd_ < 0) {

@@ -56,7 +56,7 @@
               pkgs.cmake-format
               pkgs.cmake-language-server
               pkgs.ninja
-              pkgs.gtest.dev
+              pkgs.gtest
               pkgs.ruff
               pkgs.nixfmt
               (pkgs.python313.withPackages (
@@ -90,7 +90,7 @@
                 "-DSPWRMAP_BUILD_TESTS=ON"
               ];
               buildInputs = [
-                pkgs.gtest.dev
+                pkgs.gtest
               ];
             };
           };
