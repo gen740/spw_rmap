@@ -908,19 +908,32 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         auto async_op =
             startWriteAsyncOperation_(target_node, memory_address, data,
                                       [](const Packet&) noexcept -> void {});
-        auto res = poll();
-        if (res && async_op.future.wait_for(0ms) == std::future_status::ready) {
+        auto poll_res = poll();
+        if (!poll_res.has_value()) {
+          if (async_op.transaction_id.has_value()) {
+            cancelTransaction_(*async_op.transaction_id);
+          }
+          last_error = poll_res.error();
+          continue;
+        }
+        if (!poll_res.value()) {
+          if (async_op.transaction_id.has_value()) {
+            cancelTransaction_(*async_op.transaction_id);
+          }
+          last_error = std::make_error_code(std::errc::not_connected);
+          continue;
+        }
+        if (async_op.future.wait_for(0ms) == std::future_status::ready) {
           auto res = async_op.future.get();
           if (!res.has_value()) {
             return std::unexpected{res.error()};
           }
           return {};
-        } else {
-          if (async_op.transaction_id.has_value()) {
-            cancelTransaction_(*async_op.transaction_id);
-          }
-          last_error = std::make_error_code(std::errc::timed_out);
         }
+        if (async_op.transaction_id.has_value()) {
+          cancelTransaction_(*async_op.transaction_id);
+        }
+        last_error = std::make_error_code(std::errc::timed_out);
       }
     } else {
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
@@ -977,19 +990,32 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             [data](const Packet& packet) noexcept -> void {
               std::copy_n(packet.data.data(), data.size(), data.data());
             });
-        auto res = poll();
-        if (res && async_op.future.wait_for(0ms) == std::future_status::ready) {
+        auto poll_res = poll();
+        if (!poll_res.has_value()) {
+          if (async_op.transaction_id.has_value()) {
+            cancelTransaction_(*async_op.transaction_id);
+          }
+          last_error = poll_res.error();
+          continue;
+        }
+        if (!poll_res.value()) {
+          if (async_op.transaction_id.has_value()) {
+            cancelTransaction_(*async_op.transaction_id);
+          }
+          last_error = std::make_error_code(std::errc::not_connected);
+          continue;
+        }
+        if (async_op.future.wait_for(0ms) == std::future_status::ready) {
           auto res = async_op.future.get();
           if (!res.has_value()) {
             return std::unexpected{res.error()};
           }
           return {};
-        } else {
-          if (async_op.transaction_id.has_value()) {
-            cancelTransaction_(*async_op.transaction_id);
-          }
-          last_error = std::make_error_code(std::errc::timed_out);
         }
+        if (async_op.transaction_id.has_value()) {
+          cancelTransaction_(*async_op.transaction_id);
+        }
+        last_error = std::make_error_code(std::errc::timed_out);
       }
     } else {
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
