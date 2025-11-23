@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 name = "pyspw_rmap"
 version = "0.1.1"
 description = "spw_rmap with python bindings"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 
 [project.scripts]
