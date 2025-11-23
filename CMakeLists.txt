@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.15)
 project(spw_rmap LANGUAGES CXX)
 
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
 option(SPWRMAP_BUILD_APPS "Build command line applications" ON)
 option(SPWRMAP_BUILD_EXAMPLES "Build examples" OFF)
 option(SPWRMAP_BUILD_TESTS "Build tests" ON)

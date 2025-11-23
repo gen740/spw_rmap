@@ -1,7 +1,6 @@
 #include <pybind11/cast.h>
 #include <pybind11/detail/descr.h>
 
-#include <print>
 #include <span>
 
 namespace py = pybind11;
