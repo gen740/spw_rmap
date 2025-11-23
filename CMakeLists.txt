@@ -5,7 +5,7 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 option(SPWRMAP_BUILD_APPS "Build command line applications" ON)
 option(SPWRMAP_BUILD_EXAMPLES "Build examples" OFF)
-option(SPWRMAP_BUILD_TESTS "Build tests" ON)
+option(SPWRMAP_BUILD_TESTS "Build tests" OFF)
 
 add_library(${PROJECT_NAME} STATIC)
 
