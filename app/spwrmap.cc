@@ -11,7 +11,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <utility>
 #include <vector>
 
@@ -258,6 +257,7 @@ auto main(int argc, char** argv) -> int {
   auto client =
       spw_rmap::SpwRmapTCPClient({.ip_address = opts.ip, .port = opts.port});
   client.setInitiatorLogicalAddress(kInitiatorLogicalAddress);
+  client.setAutoPollingMode(true);
 
   auto connect_res = client.connect(1s);
   if (!connect_res.has_value()) {
@@ -265,13 +265,6 @@ auto main(int argc, char** argv) -> int {
               << connect_res.error().message() << "\n";
     return 1;
   }
-
-  std::thread loop_thread([&client]() -> void {
-    auto res = client.runLoop();
-    if (!res.has_value()) {
-      std::cerr << "runLoop error: " << res.error().message() << "\n";
-    }
-  });
 
   auto target_node = std::make_shared<spw_rmap::TargetNodeDynamic>(
       kTargetLogicalAddress, std::move(opts.target_address),
@@ -285,6 +278,5 @@ auto main(int argc, char** argv) -> int {
     std::cerr << "Shutdown error: " << shutdown_res.error().message() << "\n";
     success = false;
   }
-  loop_thread.join();
   return success ? 0 : 1;
 }

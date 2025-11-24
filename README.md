@@ -43,7 +43,7 @@ The resulting package exposes `_core.SpwRmapTCPNode` mirroring the C++ API.
 - `write` / `read`: synchronous helpers that perform the transaction, block until a reply arrives (or timeout/retry), and return `std::expected` success/error codes.
 - `writeAsync` / `readAsync`: asynchronous variants returning `std::future` that resolve when the reply is received; they invoke user-supplied callbacks before fulfilling the future so event-driven integrations can react immediately.
 
-See `examples/spwrmap_example.cc` (C++) and `examples/spwrmap_example.py` (Python) for minimal workflows demonstrating how to connect, construct a target node, and issue read/write RMAP commands.
+See `examples/spwrmap_example_sync.cc`, `examples/spwrmap_example_async.cc` (C++), and `examples/spwrmap_example.py` (Python) for minimal workflows demonstrating how to connect, construct a target node, and issue read/write RMAP commands.
 
 # Quick Start Guide
 
@@ -78,7 +78,10 @@ int main() {
 
   // ...
 
-  client.shutdown();
+  auto shutdown_res = client.shutdown();
+  if (!shutdown_res.has_value()) {
+    throw std::system_error(shutdown_res.error());
+  }
   if (loop.joinable()) {
     loop.join();
   }
@@ -159,6 +162,7 @@ print("sync read:", list(data))
 ```
 
 Destroy the `SpwRmapTCPNode` instance (or let it go out of scope) when you are done—the underlying socket is closed automatically.
+If you prefer explicit lifecycle management, call `node.shutdown()` yourself or follow `examples/spwrmap_example.py`, which wraps the connection in a context manager to pair `connect()`/`shutdown()` deterministically.
 
 ## Timeouts and Error Handling
 

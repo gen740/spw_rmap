@@ -15,7 +15,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -300,24 +299,13 @@ auto main(int argc, char** argv) -> int {
   auto client =
       spw_rmap::SpwRmapTCPClient({.ip_address = opts.ip, .port = opts.port});
   client.setInitiatorLogicalAddress(kInitiatorLogicalAddress);
+  client.setAutoPollingMode(true);
 
   auto connect_res = client.connect(1s);
   if (!connect_res.has_value()) {
     std::cerr << "Failed to connect: " << connect_res.error().message() << "\n";
     return 1;
   }
-
-  std::thread loop_thread([&client]() {
-    auto res = client.runLoop();
-    if (!res.has_value()) {
-      std::cerr << "runLoop error: " << res.error().message() << "\n";
-    }
-  });
-  auto joinLoop = [&loop_thread]() noexcept {
-    if (loop_thread.joinable()) {
-      loop_thread.join();
-    }
-  };
 
   auto target = std::make_shared<spw_rmap::TargetNodeDynamic>(
       kTargetLogicalAddress, std::move(opts.target_address),
@@ -332,8 +320,10 @@ auto main(int argc, char** argv) -> int {
     if (!res.has_value()) {
       std::cerr << "Write failed at offset " << offset << ": "
                 << res.error().message() << "\n";
-      client.shutdown();
-      joinLoop();
+      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+        std::cerr << "Shutdown error: " << shutdown_res.error().message()
+                  << "\n";
+      }
       return 1;
     }
   }
@@ -345,22 +335,15 @@ auto main(int argc, char** argv) -> int {
   updateProgress(0, ntimes);
   for (std::size_t iter = 0; iter < ntimes; ++iter) {
     const auto start_time = Clock::now();
-    auto future = client.readAsync(
-        target, base_address, static_cast<uint32_t>(total_bytes),
-        [&read_buffer](spw_rmap::Packet packet) -> void {
-          if (packet.data.size() != read_buffer.size()) {
-            throw std::runtime_error("Unexpected data size in callback");
-          }
-          std::ranges::copy(packet.data, read_buffer.begin());
-        });
-    future.wait();
-    auto res = future.get();
+    auto res = client.read(target, base_address, std::span(read_buffer));
     const auto end_time = Clock::now();
     if (!res.has_value()) {
       std::cerr << "Read failed during iteration " << (iter + 1) << ": "
                 << res.error().message() << "\n";
-      client.shutdown();
-      joinLoop();
+      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+        std::cerr << "Shutdown error: " << shutdown_res.error().message()
+                  << "\n";
+      }
       return 1;
     }
 
@@ -368,8 +351,10 @@ auto main(int argc, char** argv) -> int {
                     pattern.end())) {
       std::cerr << "Data mismatch detected during iteration " << (iter + 1)
                 << "\n";
-      client.shutdown();
-      joinLoop();
+      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+        std::cerr << "Shutdown error: " << shutdown_res.error().message()
+                  << "\n";
+      }
       return 1;
     }
 
@@ -394,10 +379,7 @@ auto main(int argc, char** argv) -> int {
   auto shutdown_res = client.shutdown();
   if (!shutdown_res.has_value()) {
     std::cerr << "Shutdown error: " << shutdown_res.error().message() << "\n";
-    joinLoop();
     return 1;
   }
-
-  joinLoop();
   return 0;
 }
