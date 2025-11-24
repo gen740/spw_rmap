@@ -18,11 +18,11 @@ def make_target(logical_address: int = 0x32) -> TargetNode:
 @contextlib.contextmanager
 def open_node(ip: str = "127.0.0.1", port: str = "10030"):
     node = SpwRmapTCPNode(ip_address=ip, port=port)
-    node.start()
+    node.connect()
     try:
         yield node
     finally:
-        node.stop()
+        node.shutdown()
 
 
 def print_bytes(label: str, data: Iterable[int]) -> None:

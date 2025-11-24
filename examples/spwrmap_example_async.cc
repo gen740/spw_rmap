@@ -11,7 +11,6 @@
 using namespace std::chrono_literals;
 
 auto main() -> int try {
-  // Connect to the SpaceWire/RMAP bridge.
   spw_rmap::SpwRmapTCPClient client(
       {.ip_address = "192.168.1.100", .port = "10030"});
   client.setInitiatorLogicalAddress(0xFE);
@@ -19,14 +18,12 @@ auto main() -> int try {
     std::cerr << "Connect failed: " << res.error().message() << '\n';
     return 1;
   }
-  std::cout << "Connected to RMAP bridge\n";
+  std::cout << "Connected to RMAP bridge (async example)\n";
 
-  // Create a target node describing the remote logical/SpaceWire addresses.
   auto target = std::make_shared<spw_rmap::TargetNodeDynamic>(
       0x32, std::vector<uint8_t>{0x06, 0x02}, std::vector<uint8_t>{0x01, 0x03});
 
-  // Run the receive loop on a background thread so replies are processed.
-  std::thread loop([&client]() {
+  std::thread loop([&client]() -> void {
     auto res = client.runLoop();
     if (!res.has_value()) {
       std::cerr << "runLoop error: " << res.error().message() << '\n';
@@ -36,44 +33,44 @@ auto main() -> int try {
   const uint32_t demo_address = 0x44A20000;
   const std::array<uint8_t, 4> payload{0x01, 0x02, 0x03, 0x04};
 
-  // Blocking write then read back into a local buffer.
-  bool keep_running = true;
+  bool ok = true;
   if (auto res = client.write(target, demo_address, payload);
       !res.has_value()) {
     std::cerr << "Sync write failed: " << res.error().message() << '\n';
-    keep_running = false;
+    ok = false;
   } else {
     std::array<uint8_t, 4> buffer{};
     if (auto res = client.read(target, demo_address, std::span(buffer));
         res.has_value()) {
-      std::cout << "Sync read: ";
+      std::cout << "Sync read:";
       for (auto byte : buffer) {
-        std::cout << "0x" << std::hex << +byte << ' ';
+        std::cout << " 0x" << std::hex << +byte;
       }
       std::cout << std::dec << '\n';
     } else {
       std::cerr << "Sync read failed: " << res.error().message() << '\n';
-      keep_running = false;
+      ok = false;
     }
   }
 
-  if (keep_running) {
+  if (ok) {
     auto write_future = client.writeAsync(
-        target, demo_address, payload, [](const spw_rmap::Packet&) {
+        target, demo_address, payload, [](const spw_rmap::Packet&) -> void {
           std::cout << "Async write completed\n";
         });
     if (!write_future.get().has_value()) {
       std::cerr << "Async write failed\n";
-      keep_running = false;
+      ok = false;
     }
   }
 
-  if (keep_running) {
-    auto read_future = client.readAsync(
-        target, demo_address, payload.size(), [](spw_rmap::Packet packet) {
-          std::cout << "Async read returned " << packet.data.size()
-                    << " bytes\n";
-        });
+  if (ok) {
+    auto read_future = client.readAsync(target, demo_address, payload.size(),
+                                        [](spw_rmap::Packet packet) -> void {
+                                          std::cout << "Async read returned "
+                                                    << packet.data.size()
+                                                    << " bytes\n";
+                                        });
     if (!read_future.get().has_value()) {
       std::cerr << "Async read failed\n";
     }
