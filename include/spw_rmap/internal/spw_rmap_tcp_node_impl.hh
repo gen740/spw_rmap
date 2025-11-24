@@ -1,8 +1,8 @@
 // Copyright (c) 2025 Gen
 // Licensed under the MIT License. See LICENSE file for details.
 #pragma once
+#include <algorithm>
 #include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -11,6 +11,8 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "spw_rmap/error_code.hh"
@@ -60,6 +62,31 @@ concept TcpBackend = requires(
   } -> std::same_as<std::expected<std::monostate, std::error_code>>;
 };
 
+template <class F>
+class Defer {
+ public:
+  auto operator=(Defer&&) -> Defer& = delete;
+  Defer(const Defer&) = delete;
+  auto operator=(const Defer&) -> Defer& = delete;
+
+  Defer(Defer&& o) noexcept(std::is_nothrow_move_constructible_v<F>)
+      : f_(std::move(o.f_)), active(o.active) {
+    o.active = false;
+  }
+  explicit Defer(F&& f) : f_(std::forward<F>(f)) {}  // NOLINT
+
+  ~Defer() noexcept {
+    if (active) std::invoke(f_);
+  }
+
+ private:
+  F f_;
+  bool active = true;
+};
+
+template <class F>
+Defer(F) -> Defer<std::decay_t<F>>;
+
 template <TcpBackend Backend>
 class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
  private:
@@ -94,9 +121,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   std::function<void(Packet)> on_write_callback_ = nullptr;
   std::function<std::vector<uint8_t>(Packet)> on_read_callback_ = nullptr;
 
-  std::condition_variable poll_cv_;
   std::atomic<bool> auto_polling_mode_{false};
-  std::atomic<bool> receiving_{false};
   std::mutex auto_poll_mtx_;
 
  public:
@@ -696,10 +721,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   virtual auto isShutdowned() noexcept -> bool = 0;
 
   auto poll() noexcept -> std::expected<bool, std::error_code> override {
-    receiving_ = true;
-    poll_cv_.notify_one();
     auto res = recvAndParseOnePacket_();
-    receiving_ = false;
     if (!res.has_value()) {
       if (isShutdowned()) {
         return false;
@@ -905,35 +927,47 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         return std::unexpected{res.error()};
       }
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-        auto async_op =
-            startWriteAsyncOperation_(target_node, memory_address, data,
-                                      [](const Packet&) noexcept -> void {});
-        auto poll_res = poll();
-        if (!poll_res.has_value()) {
-          if (async_op.transaction_id.has_value()) {
-            cancelTransaction_(*async_op.transaction_id);
-          }
-          last_error = poll_res.error();
+        auto transaction_id_res = getAvailableTransactionID_();
+        if (!transaction_id_res.has_value()) {
+          spw_rmap::debug::debug(
+              "Failed to get available Transaction ID for write(): ",
+              transaction_id_res.error().message());
+          last_error = transaction_id_res.error();
           continue;
         }
-        if (!poll_res.value()) {
-          if (async_op.transaction_id.has_value()) {
-            cancelTransaction_(*async_op.transaction_id);
-          }
-          last_error = std::make_error_code(std::errc::not_connected);
+        const auto transaction_id = *transaction_id_res;
+        Defer release_tx_id{[this, transaction_id]() noexcept -> void {
+          releaseTransactionID_(transaction_id);
+        }};
+        auto send_res =
+            sendWritePacket_(target_node, transaction_id, memory_address, data);
+        if (!send_res.has_value()) {
+          last_error = send_res.error();
           continue;
         }
-        if (async_op.future.wait_for(0ms) == std::future_status::ready) {
-          auto res = async_op.future.get();
-          if (!res.has_value()) {
-            return std::unexpected{res.error()};
+        auto recv_res = recvAndParseOnePacket_();
+        if (!recv_res.has_value()) {
+          spw_rmap::debug::debug("Error in receiving/parsing packet: ",
+                                 recv_res.error().message());
+          last_error = recv_res.error();
+          continue;
+        }
+        if (recv_res.value() == 0) {
+          auto shutdown_res = shutdown();
+          if (!shutdown_res.has_value()) {
+            spw_rmap::debug::debug("Error in shutdown after recv returning 0: ",
+                                   shutdown_res.error().message());
+            return std::unexpected{shutdown_res.error()};
           }
+          return std::unexpected{
+              std::make_error_code(std::errc::not_connected)};
+        }
+        auto& packet = packet_parser_.getPacket();
+        if (packet.type == PacketType::WriteReply &&
+            packet.transactionID == transaction_id) {
           return {};
         }
-        if (async_op.transaction_id.has_value()) {
-          cancelTransaction_(*async_op.transaction_id);
-        }
-        last_error = std::make_error_code(std::errc::timed_out);
+        last_error = std::make_error_code(std::errc::bad_message);
       }
     } else {
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
@@ -985,37 +1019,52 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         return std::unexpected{res.error()};
       }
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-        auto async_op = startReadAsyncOperation_(
-            target_node, memory_address, data.size(),
-            [data](const Packet& packet) noexcept -> void {
-              std::copy_n(packet.data.data(), data.size(), data.data());
-            });
-        auto poll_res = poll();
-        if (!poll_res.has_value()) {
-          if (async_op.transaction_id.has_value()) {
-            cancelTransaction_(*async_op.transaction_id);
-          }
-          last_error = poll_res.error();
+        auto transaction_id_res = getAvailableTransactionID_();
+        if (!transaction_id_res.has_value()) {
+          spw_rmap::debug::debug(
+              "Failed to get available Transaction ID for read(): ",
+              transaction_id_res.error().message());
+          last_error = transaction_id_res.error();
           continue;
         }
-        if (!poll_res.value()) {
-          if (async_op.transaction_id.has_value()) {
-            cancelTransaction_(*async_op.transaction_id);
-          }
-          last_error = std::make_error_code(std::errc::not_connected);
+        const auto transaction_id = *transaction_id_res;
+        Defer release_tx_id{[this, transaction_id]() noexcept -> void {
+          releaseTransactionID_(transaction_id);
+        }};
+        auto send_res = sendReadPacket_(target_node, transaction_id,
+                                        memory_address, data.size());
+        if (!send_res.has_value()) {
+          last_error = send_res.error();
           continue;
         }
-        if (async_op.future.wait_for(0ms) == std::future_status::ready) {
-          auto res = async_op.future.get();
-          if (!res.has_value()) {
-            return std::unexpected{res.error()};
+        auto recv_res = recvAndParseOnePacket_();
+        if (!recv_res.has_value()) {
+          spw_rmap::debug::debug("Error in receiving/parsing packet: ",
+                                 recv_res.error().message());
+          last_error = recv_res.error();
+          continue;
+        }
+        if (recv_res.value() == 0) {
+          auto shutdown_res = shutdown();
+          if (!shutdown_res.has_value()) {
+            spw_rmap::debug::debug("Error in shutdown after recv returning 0: ",
+                                   shutdown_res.error().message());
+            return std::unexpected{shutdown_res.error()};
           }
+          return std::unexpected{
+              std::make_error_code(std::errc::not_connected)};
+        }
+        auto& packet = packet_parser_.getPacket();
+        if (packet.type == PacketType::ReadReply &&
+            packet.transactionID == transaction_id) {
+          if (packet.data.size() < data.size()) {
+            last_error = std::make_error_code(std::errc::message_size);
+            continue;
+          }
+          std::ranges::copy(packet.data, data.begin());
           return {};
         }
-        if (async_op.transaction_id.has_value()) {
-          cancelTransaction_(*async_op.transaction_id);
-        }
-        last_error = std::make_error_code(std::errc::timed_out);
+        last_error = std::make_error_code(std::errc::bad_message);
       }
     } else {
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
