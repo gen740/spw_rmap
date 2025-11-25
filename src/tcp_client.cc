@@ -12,6 +12,7 @@
 
 #include <chrono>
 #include <span>
+#include <sstream>
 #include <system_error>
 
 #include "spw_rmap/internal/debug.hh"
@@ -19,6 +20,20 @@
 namespace spw_rmap::internal {
 
 using namespace std::chrono_literals;
+
+namespace {
+inline void log_errno_(const char* msg, int err) noexcept {
+  if constexpr (!spw_rmap::debug::enabled) {
+    (void)msg;
+    (void)err;
+    return;
+  }
+  const std::error_code ec(err, std::system_category());
+  std::ostringstream oss;
+  oss << msg << ": " << ec.message() << " (errno=" << ec.value() << ")";
+  spw_rmap::debug::debug(oss.str());
+}
+}  // namespace
 
 static auto close_retry_(int fd) noexcept -> void {
   if (fd >= 0) {
@@ -46,14 +61,16 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
 
   const int oldfl = ::fcntl(fd, F_GETFL);
   if (oldfl < 0) {
-    spw_rmap::debug::debug("Failed to get fd flags");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int err = errno;
+    log_errno_("Failed to get fd flags", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
   }
   const bool was_blocking = (oldfl & O_NONBLOCK) == 0;
   if (was_blocking) {
     if (::fcntl(fd, F_SETFL, oldfl | O_NONBLOCK) < 0) {
-      spw_rmap::debug::debug("Failed to set fd to non-blocking");
-      return std::unexpected{std::error_code(errno, std::system_category())};
+      const int err = errno;
+      log_errno_("Failed to set fd to non-blocking", err);
+      return std::unexpected{std::error_code(err, std::system_category())};
     }
   }
 
@@ -82,9 +99,10 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
     return {};  // Connected immediately.
   }
 
-  if (errno != EINPROGRESS) {
-    spw_rmap::debug::debug("Connect failed");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+  const int err = errno;
+  if (err != EINPROGRESS) {
+    log_errno_("Connect failed", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
   }
   pollfd pfd{.fd = fd, .events = POLLOUT, .revents = 0};
   int prc = 0;
@@ -97,18 +115,21 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
     return std::unexpected{std::error_code(ETIMEDOUT, std::system_category())};
   }
   if (prc < 0) {
-    spw_rmap::debug::debug("Poll failed during connect");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int poll_err = errno;
+    log_errno_("Poll failed during connect", poll_err);
+    return std::unexpected{std::error_code(poll_err, std::system_category())};
   }
 
   int soerr = 0;
   auto slen = static_cast<socklen_t>(sizeof(soerr));
   if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &slen) != 0) {
-    spw_rmap::debug::debug("getsockopt failed after poll");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int soerr_errno = errno;
+    log_errno_("getsockopt failed after poll", soerr_errno);
+    return std::unexpected{
+        std::error_code(soerr_errno, std::system_category())};
   }
   if (soerr != 0) {
-    spw_rmap::debug::debug("Connect failed after poll");
+    log_errno_("Connect failed after poll", soerr);
     return std::unexpected{std::error_code(soerr, std::system_category())};
   }
   return {};
@@ -118,19 +139,22 @@ static auto set_sockopts(int fd) noexcept
     -> std::expected<std::monostate, std::error_code> {
   int yes = 1;
   if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0) {
-    spw_rmap::debug::debug("Failed to set TCP_NODELAY");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int err = errno;
+    log_errno_("Failed to set TCP_NODELAY", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
   }
 #ifdef __APPLE__
   if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) != 0) {
-    spw_rmap::debug::debug("Failed to set SO_NOSIGPIPE");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int err = errno;
+    log_errno_("Failed to set SO_NOSIGPIPE", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
   }
 #endif
   const int fdflags = ::fcntl(fd, F_GETFD);
   if (fdflags < 0 || ::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) {
-    spw_rmap::debug::debug("Failed to set FD_CLOEXEC");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int err = errno;
+    log_errno_("Failed to set FD_CLOEXEC", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
   }
   return {};
 }
@@ -153,7 +177,8 @@ static auto socket_alive_(int fd) noexcept -> bool {
     prc = ::poll(&pfd, 1, 0);
   } while (prc < 0 && errno == EINTR);
   if (prc < 0) {
-    spw_rmap::debug::debug("poll failed while checking client socket");
+    const int err = errno;
+    log_errno_("poll failed while checking client socket", err);
     return false;
   }
   if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL
@@ -169,9 +194,9 @@ static auto socket_alive_(int fd) noexcept -> bool {
     if (n == 0) {
       return false;
     }
-    if (n < 0 &&
-        errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-      spw_rmap::debug::debug("recv peek failed while checking client socket");
+    const int err = errno;
+    if (n < 0 && err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
+      log_errno_("recv peek failed while checking client socket", err);
       return false;
     }
   }
@@ -214,8 +239,9 @@ static inline auto gai_category() noexcept -> const std::error_category& {
                              std::string(port_).c_str(), &hints, &res);
       rc != 0) {
     if (rc == EAI_SYSTEM) {
-      spw_rmap::debug::debug("getaddrinfo system error");
-      return std::unexpected{std::error_code(errno, std::system_category())};
+      const int err = errno;
+      log_errno_("getaddrinfo system error", err);
+      return std::unexpected{std::error_code(err, std::system_category())};
     } else {
       spw_rmap::debug::debug("getaddrinfo error: ", ::gai_strerror(rc));
       return std::unexpected{std::error_code(rc, gai_category())};
@@ -228,7 +254,9 @@ static inline auto gai_category() noexcept -> const std::error_category& {
   for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
     fd_ = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
     if (fd_ < 0) {
-      last = std::unexpected{std::error_code(errno, std::system_category())};
+      const int err = errno;
+      log_errno_("Failed to create client socket", err);
+      last = std::unexpected{std::error_code(err, std::system_category())};
       close_retry_(fd_);
       fd_ = -1;
       continue;
@@ -284,8 +312,9 @@ auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
   tv.tv_usec = tv_usec;
 
   if (::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
-    spw_rmap::debug::debug("Failed to set send timeout");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int err = errno;
+    log_errno_("Failed to set send timeout", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
   }
   return {};
 }
@@ -303,8 +332,9 @@ auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
   tv.tv_sec = tv_sec;
   tv.tv_usec = tv_usec;
   if (::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
-    spw_rmap::debug::debug("Failed to set receive timeout");
-    return std::unexpected{std::error_code(errno, std::system_category())};
+    const int err = errno;
+    log_errno_("Failed to set receive timeout", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
   }
   return {};
 }
@@ -324,15 +354,16 @@ auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
 #endif
     const ssize_t n = ::send(fd_, data.data(), data.size(), kFlags);
     if (n < 0) {
-      if (errno == EINTR) {
+      const int err = errno;
+      if (err == EINTR) {
         continue;
       }
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      if (err == EAGAIN || err == EWOULDBLOCK) {
         spw_rmap::debug::debug("Send would block, timing out");
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
-      spw_rmap::debug::debug("Send failed");
-      return std::unexpected{std::error_code(errno, std::system_category())};
+      log_errno_("Send failed", err);
+      return std::unexpected{std::error_code(err, std::system_category())};
     }
     if (n == 0) {
       if (retried_zero) {
@@ -350,8 +381,10 @@ auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       if (prc < 0) {
-        spw_rmap::debug::debug("Poll failed after send returned zero");
-        return std::unexpected{std::error_code(errno, std::system_category())};
+        const int poll_err = errno;
+        log_errno_("Poll failed after send returned zero", poll_err);
+        return std::unexpected{
+            std::error_code(poll_err, std::system_category())};
       }
       if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
         spw_rmap::debug::debug(
@@ -380,15 +413,16 @@ auto TCPClient::recvSome(std::span<uint8_t> buf) noexcept
   for (;;) {
     const ssize_t n = ::recv(fd_, buf.data(), buf.size(), 0);
     if (n < 0) {
-      if (errno == EINTR) {
+      const int err = errno;
+      if (err == EINTR) {
         continue;
       }
-      if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      if (err == EAGAIN || err == EWOULDBLOCK) {
         spw_rmap::debug::debug("Receive would block, timing out");
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
-      spw_rmap::debug::debug("Receive failed");
-      return std::unexpected{std::error_code(errno, std::system_category())};
+      log_errno_("Receive failed", err);
+      return std::unexpected{std::error_code(err, std::system_category())};
     } else if (n == 0) {
       spw_rmap::debug::debug("Connection closed by peer");
       return std::unexpected{std::make_error_code(std::errc::io_error)};
@@ -405,8 +439,9 @@ auto TCPClient::shutdown() noexcept
         std::make_error_code(std::errc::bad_file_descriptor));
   }
   if (::shutdown(fd_, SHUT_RDWR) < 0) {
-    spw_rmap::debug::debug("Shutdown failed");
-    return std::unexpected(std::error_code(errno, std::generic_category()));
+    const int err = errno;
+    log_errno_("Shutdown failed", err);
+    return std::unexpected(std::error_code(err, std::generic_category()));
   }
   return std::monostate{};
 }
