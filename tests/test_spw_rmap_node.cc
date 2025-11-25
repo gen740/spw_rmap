@@ -86,6 +86,14 @@ class MockBackend {
     return std::monostate{};
   }
 
+  auto ensureConnect() noexcept
+      -> std::expected<std::monostate, std::error_code> {
+    if (shutdown_) {
+      shutdown_ = false;
+    }
+    return std::monostate{};
+  }
+
   void enqueueIncoming(const std::vector<uint8_t>& data) {
     {
       std::lock_guard<std::mutex> lock(mtx_);
