@@ -214,11 +214,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto connectLoopUntilHealthy_() noexcept
       -> std::expected<std::monostate, std::error_code> {
-    std::error_code last_error =
-        std::make_error_code(std::errc::not_connected);
+    std::error_code last_error = std::make_error_code(std::errc::not_connected);
     constexpr int kMaxAttempts = 3;
-    for (int attempt = 0;
-         attempt < kMaxAttempts && running_.load(); ++attempt) {
+    for (int attempt = 0; attempt < kMaxAttempts && running_.load();
+         ++attempt) {
       auto res = ensureConnectionReady_();
       if (res.has_value()) {
         return res;

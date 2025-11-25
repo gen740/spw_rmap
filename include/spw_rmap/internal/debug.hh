@@ -5,9 +5,9 @@
 #define SPW_RMAP_DEBUG 0
 #endif
 
-constexpr bool DEBUG = static_cast<bool>(SPW_RMAP_DEBUG);
-
 namespace spw_rmap::debug {
+
+inline constexpr bool enabled = static_cast<bool>(SPW_RMAP_DEBUG);
 
 template <typename T>
 void debug_impl(T&& msg, const std::source_location& loc =
@@ -19,7 +19,7 @@ void debug_impl(T&& msg, const std::source_location& loc =
 template <typename T>
 constexpr void debug(T&& msg, const std::source_location& loc =
                                   std::source_location::current()) {
-  if constexpr (DEBUG) {
+  if constexpr (enabled) {
     debug_impl(std::forward<T>(msg), loc);
   }
 }
@@ -37,7 +37,7 @@ template <typename T, typename Arg>
 constexpr void debug(
     T&& msg, Arg&& value,
     const std::source_location& loc = std::source_location::current()) {
-  if constexpr (DEBUG) {
+  if constexpr (enabled) {
     debug_impl(std::forward<T>(msg), std::forward<Arg>(value), loc);
   }
 }
