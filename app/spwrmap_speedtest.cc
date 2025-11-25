@@ -11,7 +11,6 @@
 #include <optional>
 #include <random>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -333,6 +332,7 @@ auto main(int argc, char** argv) -> int {
   std::vector<uint8_t> read_buffer(total_bytes);
 
   updateProgress(0, ntimes);
+
   for (std::size_t iter = 0; iter < ntimes; ++iter) {
     const auto start_time = Clock::now();
     auto res = client.read(target, base_address, std::span(read_buffer));
@@ -363,6 +363,7 @@ auto main(int argc, char** argv) -> int {
     latencies_us.push_back(elapsed);
     updateProgress(iter + 1, ntimes);
   }
+
   std::cerr << '\n';
 
   auto mean = computeMean(latencies_us);

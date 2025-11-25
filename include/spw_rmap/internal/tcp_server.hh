@@ -45,6 +45,9 @@ class TCPServer {
   [[nodiscard]] auto accept_once() noexcept
       -> std::expected<std::monostate, std::error_code>;
 
+  [[nodiscard]] auto ensureConnect() noexcept
+      -> std::expected<std::monostate, std::error_code>;
+
   [[nodiscard]] auto setSendTimeout(std::chrono::microseconds timeout) noexcept
       -> std::expected<std::monostate, std::error_code>;
 
