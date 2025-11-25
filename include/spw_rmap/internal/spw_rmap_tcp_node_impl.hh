@@ -11,6 +11,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -56,9 +57,15 @@ concept TcpBackend = requires(
   {
     b.setSendTimeout(us)
   } -> std::same_as<std::expected<std::monostate, std::error_code>>;
+  {
+    b.setReceiveTimeout(us)
+  } -> std::same_as<std::expected<std::monostate, std::error_code>>;
   { b.recvSome(inbuf) } -> std::same_as<std::expected<size_t, std::error_code>>;
   {
     b.sendAll(outbuf)
+  } -> std::same_as<std::expected<std::monostate, std::error_code>>;
+  {
+    b.ensureConnect()
   } -> std::same_as<std::expected<std::monostate, std::error_code>>;
 };
 
@@ -187,6 +194,39 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       }
     }
     return {};
+  }
+
+  auto ensureConnectionReady_() noexcept
+      -> std::expected<std::monostate, std::error_code> {
+    if (!tcp_backend_) {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
+    auto ensure_res = tcp_backend_->ensureConnect();
+    if (!ensure_res.has_value()) {
+      return std::unexpected{ensure_res.error()};
+    }
+    auto timeout_res = tcp_backend_->setSendTimeout(send_timeout_);
+    if (!timeout_res.has_value()) {
+      return std::unexpected{timeout_res.error()};
+    }
+    return {};
+  }
+
+  auto connectLoopUntilHealthy_() noexcept
+      -> std::expected<std::monostate, std::error_code> {
+    std::error_code last_error =
+        std::make_error_code(std::errc::not_connected);
+    constexpr int kMaxAttempts = 3;
+    for (int attempt = 0;
+         attempt < kMaxAttempts && running_.load(); ++attempt) {
+      auto res = ensureConnectionReady_();
+      if (res.has_value()) {
+        return res;
+      }
+      last_error = res.error();
+      std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    }
+    return std::unexpected{last_error};
   }
 
  private:
@@ -886,7 +926,15 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       auto res = poll();
       if (!res.has_value()) {
         spw_rmap::debug::debug("Error in poll(): ", res.error().message());
-        return std::unexpected{res.error()};
+        auto ensure_res = ensureConnectionReady_();
+        if (ensure_res.has_value()) {
+          continue;
+        }
+        auto reconnect_res = connectLoopUntilHealthy_();
+        if (!reconnect_res.has_value()) {
+          return std::unexpected{reconnect_res.error()};
+        }
+        continue;
       }
       if (!res.value()) {
         break;
@@ -922,11 +970,18 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
-      auto res = tcp_backend_->setReceiveTimeout(timeout);
-      if (!res.has_value()) {
-        return std::unexpected{res.error()};
-      }
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
+        if (attempt > 0) {
+          auto ensure_res = ensureConnectionReady_();
+          if (!ensure_res.has_value()) {
+            last_error = ensure_res.error();
+            continue;
+          }
+        }
+        auto recv_timeout_res = tcp_backend_->setReceiveTimeout(timeout);
+        if (!recv_timeout_res.has_value()) {
+          return std::unexpected{recv_timeout_res.error()};
+        }
         auto transaction_id_res = getAvailableTransactionID_();
         if (!transaction_id_res.has_value()) {
           spw_rmap::debug::debug(
@@ -1014,11 +1069,18 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
-      auto res = tcp_backend_->setReceiveTimeout(timeout);
-      if (!res.has_value()) {
-        return std::unexpected{res.error()};
-      }
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
+        if (attempt > 0) {
+          auto ensure_res = ensureConnectionReady_();
+          if (!ensure_res.has_value()) {
+            last_error = ensure_res.error();
+            continue;
+          }
+        }
+        auto recv_timeout_res = tcp_backend_->setReceiveTimeout(timeout);
+        if (!recv_timeout_res.has_value()) {
+          return std::unexpected{recv_timeout_res.error()};
+        }
         auto transaction_id_res = getAvailableTransactionID_();
         if (!transaction_id_res.has_value()) {
           spw_rmap::debug::debug(

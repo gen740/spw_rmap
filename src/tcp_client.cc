@@ -135,6 +135,49 @@ static auto set_sockopts(int fd) noexcept
   return {};
 }
 
+static auto socket_alive_(int fd) noexcept -> bool {
+  if (fd < 0) {
+    return false;
+  }
+  pollfd pfd{
+      .fd = fd,
+      .events = POLLIN | POLLERR | POLLHUP
+#ifdef POLLRDHUP
+                | POLLRDHUP
+#endif
+      ,
+      .revents = 0,
+  };
+  int prc = 0;
+  do {
+    prc = ::poll(&pfd, 1, 0);
+  } while (prc < 0 && errno == EINTR);
+  if (prc < 0) {
+    spw_rmap::debug::debug("poll failed while checking client socket");
+    return false;
+  }
+  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL
+#ifdef POLLRDHUP
+                     | POLLRDHUP
+#endif
+                     )) {
+    return false;
+  }
+  if ((pfd.revents & POLLIN) != 0) {
+    uint8_t tmp{};
+    const ssize_t n = ::recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT);
+    if (n == 0) {
+      return false;
+    }
+    if (n < 0 &&
+        errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+      spw_rmap::debug::debug("recv peek failed while checking client socket");
+      return false;
+    }
+  }
+  return true;
+}
+
 TCPClient::~TCPClient() {
   disconnect();
   fd_ = -1;
@@ -207,6 +250,18 @@ static inline auto gai_category() noexcept -> const std::error_category& {
     fd_ = -1;
   }
   return last;
+}
+
+auto TCPClient::ensureConnect(std::chrono::microseconds timeout) noexcept
+    -> std::expected<std::monostate, std::error_code> {
+  if (fd_ >= 0 && socket_alive_(fd_)) {
+    return {};
+  }
+  if (fd_ >= 0) {
+    spw_rmap::debug::debug("Existing connection unhealthy, reconnecting");
+    disconnect();
+  }
+  return connect(timeout);
 }
 
 auto TCPClient::disconnect() noexcept -> void {

@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <sys/fcntl.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -59,6 +60,49 @@ static inline auto server_set_sockopts(int fd)
     return std::unexpected{std::error_code(errno, std::system_category())};
   }
   return {};
+}
+
+static auto socket_alive_(int fd) noexcept -> bool {
+  if (fd < 0) {
+    return false;
+  }
+  pollfd pfd{
+      .fd = fd,
+      .events = POLLIN | POLLERR | POLLHUP
+#ifdef POLLRDHUP
+                | POLLRDHUP
+#endif
+      ,
+      .revents = 0,
+  };
+  int prc = 0;
+  do {
+    prc = ::poll(&pfd, 1, 0);
+  } while (prc < 0 && errno == EINTR);
+  if (prc < 0) {
+    spw_rmap::debug::debug("poll failed while checking server socket");
+    return false;
+  }
+  if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL
+#ifdef POLLRDHUP
+                     | POLLRDHUP
+#endif
+                     )) {
+    return false;
+  }
+  if ((pfd.revents & POLLIN) != 0) {
+    uint8_t tmp{};
+    const ssize_t n = ::recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT);
+    if (n == 0) {
+      return false;
+    }
+    if (n < 0 &&
+        errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
+      spw_rmap::debug::debug("recv peek failed while checking server socket");
+      return false;
+    }
+  }
+  return true;
 }
 
 auto TCPServer::close_retry_(int fd) noexcept -> void {
@@ -164,6 +208,19 @@ auto TCPServer::accept_once() noexcept
   close_retry_(listen_fd_);
   listen_fd_ = -1;
   return {};
+}
+
+auto TCPServer::ensureConnect() noexcept
+    -> std::expected<std::monostate, std::error_code> {
+  if (client_fd_ >= 0 && socket_alive_(client_fd_)) {
+    return {};
+  }
+  if (client_fd_ >= 0) {
+    spw_rmap::debug::debug("Client socket unhealthy, reopening server socket");
+    close_retry_(client_fd_);
+    client_fd_ = -1;
+  }
+  return accept_once();
 }
 
 TCPServer::~TCPServer() noexcept {
