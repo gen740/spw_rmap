@@ -237,13 +237,12 @@ auto TCPServer::accept_once() noexcept
                  listen_fd_ = -1;
                  close_retry_(client_fd_);
                  client_fd_ = -1;
-                 spw_rmap::debug::debug(
-                     [ec]() {
-                       std::ostringstream oss;
-                       oss << "Failed to set socket options on accepted socket: "
-                           << ec.message() << " (errno=" << ec.value() << ")";
-                       return oss.str();
-                     }());
+                 spw_rmap::debug::debug([ec]() {
+                   std::ostringstream oss;
+                   oss << "Failed to set socket options on accepted socket: "
+                       << ec.message() << " (errno=" << ec.value() << ")";
+                   return oss.str();
+                 }());
                  return std::unexpected{ec};
                });
   }
