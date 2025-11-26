@@ -28,6 +28,11 @@ inline void log_errno_(const char* msg, int err) noexcept {
     (void)err;
     return;
   }
+  if (!spw_rmap::debug::is_runtime_enabled()) {
+    (void)msg;
+    (void)err;
+    return;
+  }
   const std::error_code ec(err, std::system_category());
   std::ostringstream oss;
   oss << msg << ": " << ec.message() << " (errno=" << ec.value() << ")";

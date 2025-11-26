@@ -1,3 +1,6 @@
+#pragma once
+
+#include <atomic>
 #include <iostream>
 #include <source_location>
 
@@ -8,6 +11,31 @@
 namespace spw_rmap::debug {
 
 inline constexpr bool enabled = static_cast<bool>(SPW_RMAP_DEBUG);
+
+#if SPW_RMAP_DEBUG
+namespace detail {
+inline auto runtime_flag() noexcept -> std::atomic<bool>& {
+  static std::atomic<bool> flag{true};
+  return flag;
+}
+}  // namespace detail
+
+inline void set_runtime_enabled(bool value) noexcept {
+  detail::runtime_flag().store(value, std::memory_order_relaxed);
+}
+
+[[nodiscard]] inline auto is_runtime_enabled() noexcept -> bool {
+  return detail::runtime_flag().load(std::memory_order_relaxed);
+}
+#else
+inline void set_runtime_enabled(bool) noexcept {}
+[[nodiscard]] inline constexpr auto is_runtime_enabled() noexcept -> bool {
+  return false;
+}
+#endif
+
+inline void enable() noexcept { set_runtime_enabled(true); }
+inline void disable() noexcept { set_runtime_enabled(false); }
 
 template <typename T>
 void debug_impl(T&& msg, const std::source_location& loc =
@@ -20,7 +48,9 @@ template <typename T>
 constexpr void debug(T&& msg, const std::source_location& loc =
                                   std::source_location::current()) {
   if constexpr (enabled) {
-    debug_impl(std::forward<T>(msg), loc);
+    if (is_runtime_enabled()) {
+      debug_impl(std::forward<T>(msg), loc);
+    }
   }
 }
 
@@ -38,7 +68,9 @@ constexpr void debug(
     T&& msg, Arg&& value,
     const std::source_location& loc = std::source_location::current()) {
   if constexpr (enabled) {
-    debug_impl(std::forward<T>(msg), std::forward<Arg>(value), loc);
+    if (is_runtime_enabled()) {
+      debug_impl(std::forward<T>(msg), std::forward<Arg>(value), loc);
+    }
   }
 }
 
