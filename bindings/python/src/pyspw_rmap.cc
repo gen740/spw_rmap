@@ -5,6 +5,7 @@
 #include <exception>
 #include <mutex>
 #include <span>
+#include <spw_rmap/internal/debug.hh>
 #include <spw_rmap/spw_rmap_node_base.hh>
 #include <spw_rmap/spw_rmap_tcp_node.hh>
 #include <spw_rmap/target_node.hh>
@@ -98,4 +99,15 @@ PYBIND11_MODULE(_core, m) {
            py::arg("memory_address"), py::arg("data_length"))
       .def("write", &PySpwRmapTCPNode::write, py::arg("target_node"),
            py::arg("memory_address"), py::arg("data"));
+
+  m.def(
+      "set_debug_enabled",
+      [](bool enabled) { spw_rmap::debug::set_runtime_enabled(enabled); },
+      py::arg("enabled"), "Enable or disable runtime debug logging");
+  m.def("enable_debug", []() { spw_rmap::debug::enable(); },
+        "Enable runtime debug logging");
+  m.def("disable_debug", []() { spw_rmap::debug::disable(); },
+        "Disable runtime debug logging");
+  m.def("is_debug_enabled", []() { return spw_rmap::debug::is_runtime_enabled(); },
+        "Check if runtime debug logging is enabled");
 }
