@@ -101,8 +101,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   std::unique_ptr<Backend> tcp_backend_ = nullptr;
 
   std::vector<uint8_t> recv_buf_ = {};
-
-  std::recursive_mutex send_buf_mtx_;
   std::vector<uint8_t> send_buf_ = {};
 
   TransactionDatabase transaction_id_database_;
@@ -120,7 +118,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   std::function<std::vector<uint8_t>(Packet)> on_read_callback_ = nullptr;
 
   std::atomic<bool> auto_polling_mode_{false};
-  std::mutex auto_poll_mtx_;
+
+  std::mutex send_mtx_;
 
  public:
   explicit SpwRmapTCPNodeImpl(SpwRmapTCPNodeConfig config) noexcept
@@ -250,8 +249,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                             (static_cast<uint64_t>(header[11]) << 0));
     return data_length;
   }
-
-  std::mutex recv_mtx_;
 
   struct AsyncOperation {
     std::future<std::expected<std::monostate, std::error_code>> future;
@@ -533,6 +530,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                        uint16_t transaction_id, uint32_t memory_address,
                        uint32_t data_length) noexcept
       -> std::expected<std::monostate, std::error_code> {
+    std::lock_guard<std::mutex> lock(send_mtx_);
     if (!tcp_backend_) {
       spw_rmap::debug::debug("Not connected");
       return std::unexpected{std::make_error_code(std::errc::not_connected)};
@@ -540,7 +538,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     auto expected_length = target_node->getTargetSpaceWireAddress().size() +
                            (target_node->getReplyAddress().size() + 3) / 4 * 4 +
                            4 + 12 + 1;
-    std::lock_guard<std::recursive_mutex> lock(send_buf_mtx_);
     auto send_buffer = std::span(send_buf_);
     if (expected_length > send_buffer.size()) {
       if (buffer_policy_ == BufferPolicy::Fixed) {
@@ -587,6 +584,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                         uint16_t transaction_id, uint32_t memory_address,
                         const std::span<const uint8_t> data) noexcept
       -> std::expected<std::monostate, std::error_code> {
+    std::lock_guard<std::mutex> lock(send_mtx_);
     if (!tcp_backend_) {
       spw_rmap::debug::debug("Not connected");
       return std::unexpected{std::make_error_code(std::errc::not_connected)};
@@ -594,7 +592,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     auto expected_length = target_node->getTargetSpaceWireAddress().size() +
                            (target_node->getReplyAddress().size() + 3) / 4 * 4 +
                            4 + 12 + 1 + data.size();
-    std::lock_guard<std::recursive_mutex> lock(send_buf_mtx_);
     auto send_buffer = std::span(send_buf_);
     if (expected_length + 12 > send_buffer.size()) {
       if (buffer_policy_ == BufferPolicy::Fixed) {
@@ -701,20 +698,17 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             .incrementMode = true,
         };
         ReadReplyPacketBuilder builder;
-        std::lock_guard<std::recursive_mutex> lock(send_buf_mtx_);
+        std::lock_guard<std::mutex> lock(send_mtx_);
         auto send_buffer = std::span(send_buf_);
-        if (buffer_policy_ == BufferPolicy::Fixed) {
-          if (builder.getTotalSize(config) + 12 > send_buffer.size()) {
+        if (builder.getTotalSize(config) + 12 > send_buffer.size()) {
+          if (buffer_policy_ == BufferPolicy::Fixed) {
             spw_rmap::debug::debug(
                 "Send buffer too small for Read Reply Packet");
             return std::unexpected{
                 std::make_error_code(std::errc::no_buffer_space)};
           }
-        } else {
-          if (builder.getTotalSize(config) + 12 > send_buffer.size()) {
-            send_buf_.resize(builder.getTotalSize(config) + 12);
-            send_buffer = std::span(send_buf_);
-          }
+          send_buf_.resize(builder.getTotalSize(config) + 12);
+          send_buffer = std::span(send_buf_);
         }
         auto build_res = builder.build(config, send_buffer.subspan(12));
         if (!build_res.has_value()) {
@@ -752,20 +746,17 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             .verifyMode = true,
         };
         WriteReplyPacketBuilder builder;
-        std::lock_guard<std::recursive_mutex> lock(send_buf_mtx_);
+        std::lock_guard<std::mutex> lock(send_mtx_);
         auto send_buffer = std::span(send_buf_);
-        if (buffer_policy_ == BufferPolicy::Fixed) {
-          if (builder.getTotalSize(config) + 12 > send_buffer.size()) {
+        if (builder.getTotalSize(config) + 12 > send_buffer.size()) {
+          if (buffer_policy_ == BufferPolicy::Fixed) {
             spw_rmap::debug::debug(
                 "Send buffer too small for Write Reply Packet");
             return std::unexpected{
                 std::make_error_code(std::errc::no_buffer_space)};
           }
-        } else {
-          if (builder.getTotalSize(config) + 12 > send_buffer.size()) {
-            send_buf_.resize(builder.getTotalSize(config) + 12);
-            send_buffer = std::span(send_buf_);
-          }
+          send_buf_.resize(builder.getTotalSize(config) + 12);
+          send_buffer = std::span(send_buf_);
         }
         auto build_res = builder.build(config, send_buffer.subspan(12));
         if (!build_res.has_value()) {
@@ -862,11 +853,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         Defer release_tx_id{[this, transaction_id]() noexcept -> void {
           transaction_id_database_.release(transaction_id);
         }};
-        auto send_res =
-            sendWritePacket_(target_node, transaction_id, memory_address, data);
-        if (!send_res.has_value()) {
-          last_error = send_res.error();
-          continue;
+        {
+          auto send_res = sendWritePacket_(target_node, transaction_id,
+                                           memory_address, data);
+          if (!send_res.has_value()) {
+            last_error = send_res.error();
+            continue;
+          }
         }
         auto recv_res = recvAndParseOnePacket_();
         if (!recv_res.has_value()) {
@@ -1038,6 +1031,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto emitTimeCode(uint8_t timecode) noexcept
       -> std::expected<std::monostate, std::error_code> override {
+    std::lock_guard<std::mutex> lock(send_mtx_);
     if (!tcp_backend_) {
       spw_rmap::debug::debug("Not connected");
       return std::unexpected{std::make_error_code(std::errc::not_connected)};
