@@ -57,17 +57,13 @@ concept TcpBackend = requires(
   { b.setPort(std::move(port)) } -> std::same_as<void>;
   {
     b.setSendTimeout(us)
-  } -> std::same_as<std::expected<std::monostate, std::error_code>>;
+  } -> std::same_as<std::expected<void, std::error_code>>;
   {
     b.setReceiveTimeout(us)
-  } -> std::same_as<std::expected<std::monostate, std::error_code>>;
+  } -> std::same_as<std::expected<void, std::error_code>>;
   { b.recvSome(inbuf) } -> std::same_as<std::expected<size_t, std::error_code>>;
-  {
-    b.sendAll(outbuf)
-  } -> std::same_as<std::expected<std::monostate, std::error_code>>;
-  {
-    b.ensureConnect()
-  } -> std::same_as<std::expected<std::monostate, std::error_code>>;
+  { b.sendAll(outbuf) } -> std::same_as<std::expected<void, std::error_code>>;
+  { b.ensureConnect() } -> std::same_as<std::expected<void, std::error_code>>;
 };
 
 template <class F>
@@ -163,7 +159,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
   auto setSendTimeoutInternal_(std::chrono::microseconds timeout) noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     if (timeout < std::chrono::microseconds::zero()) {
       return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
     }
@@ -178,7 +174,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
   auto ensureConnectionReady_() noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     if (!tcp_backend_) {
       return std::unexpected{std::make_error_code(std::errc::not_connected)};
     }
@@ -194,7 +190,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
   auto connectLoopUntilHealthy_() noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     std::error_code last_error = std::make_error_code(std::errc::not_connected);
     constexpr int kMaxAttempts = 3;
     for (int attempt = 0; attempt < kMaxAttempts && running_.load();
@@ -251,12 +247,11 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
   struct AsyncOperation {
-    std::future<std::expected<std::monostate, std::error_code>> future;
+    std::future<std::expected<void, std::error_code>> future;
     std::optional<uint16_t> transaction_id;
   };
 
-  using PromiseType =
-      std::promise<std::expected<std::monostate, std::error_code>>;
+  using PromiseType = std::promise<std::expected<void, std::error_code>>;
 
   auto startWriteAsyncOperation_(
       std::shared_ptr<TargetNodeBase> target_node, uint32_t memory_address,
@@ -508,8 +503,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return requested_size;
   }
 
-  auto send_(size_t total_size)
-      -> std::expected<std::monostate, std::error_code> {
+  auto send_(size_t total_size) -> std::expected<void, std::error_code> {
     auto send_buffer = std::span(send_buf_);
     send_buffer[0] = 0x00;
     send_buffer[1] = 0x00;
@@ -529,7 +523,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   auto sendReadPacket_(std::shared_ptr<TargetNodeBase> target_node,
                        uint16_t transaction_id, uint32_t memory_address,
                        uint32_t data_length) noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(send_mtx_);
     if (!tcp_backend_) {
       spw_rmap::debug::debug("Not connected");
@@ -583,7 +577,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   auto sendWritePacket_(std::shared_ptr<TargetNodeBase> target_node,
                         uint16_t transaction_id, uint32_t memory_address,
                         const std::span<const uint8_t> data) noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(send_mtx_);
     if (!tcp_backend_) {
       spw_rmap::debug::debug("Not connected");
@@ -626,8 +620,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
  public:
-  virtual auto shutdown() noexcept
-      -> std::expected<std::monostate, std::error_code> = 0;
+  virtual auto shutdown() noexcept -> std::expected<void, std::error_code> = 0;
 
   virtual auto isShutdowned() noexcept -> bool = 0;
 
@@ -778,8 +771,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return true;
   }
 
-  auto runLoop() noexcept
-      -> std::expected<std::monostate, std::error_code> override {
+  auto runLoop() noexcept -> std::expected<void, std::error_code> override {
     running_.store(true);
     while (running_.load()) {
       auto res = poll();
@@ -825,7 +817,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
              uint32_t memory_address, const std::span<const uint8_t> data,
              std::chrono::milliseconds timeout = std::chrono::milliseconds{100},
              std::size_t retry_count = 3) noexcept
-      -> std::expected<std::monostate, std::error_code> override {
+      -> std::expected<void, std::error_code> override {
     retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
@@ -909,9 +901,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   auto writeAsync(std::shared_ptr<TargetNodeBase> target_node,
                   uint32_t memory_address, const std::span<const uint8_t> data,
                   std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<std::monostate, std::error_code>> override {
+      -> std::future<std::expected<void, std::error_code>> override {
     if (auto_polling_mode_) {
-      std::promise<std::expected<std::monostate, std::error_code>> prom;
+      std::promise<std::expected<void, std::error_code>> prom;
       auto fut = prom.get_future();
       prom.set_value(std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)});
@@ -926,7 +918,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             uint32_t memory_address, const std::span<uint8_t> data,
             std::chrono::milliseconds timeout = std::chrono::milliseconds{100},
             std::size_t retry_count = 3) noexcept
-      -> std::expected<std::monostate, std::error_code> override {
+      -> std::expected<void, std::error_code> override {
     retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
@@ -954,7 +946,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         Defer release_tx_id{[this, transaction_id]() noexcept -> void {
           transaction_id_database_.release(transaction_id);
         }};
-        auto send_res = sendReadPacket_(target_node, transaction_id,
+        auto send_res = sendReadPacket_(std::move(target_node), transaction_id,
                                         memory_address, data.size());
         if (!send_res.has_value()) {
           last_error = send_res.error();
@@ -992,7 +984,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     } else {
       for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
         auto async_op = startReadAsyncOperation_(
-            target_node, memory_address, data.size(),
+            std::move(target_node), memory_address, data.size(),
             [data](const Packet& packet) noexcept -> void {
               std::copy_n(packet.data.data(), data.size(), data.data());
             });
@@ -1015,9 +1007,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   auto readAsync(std::shared_ptr<TargetNodeBase> target_node,
                  uint32_t memory_address, uint32_t data_length,
                  std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<std::monostate, std::error_code>> override {
+      -> std::future<std::expected<void, std::error_code>> override {
     if (auto_polling_mode_) {
-      std::promise<std::expected<std::monostate, std::error_code>> prom;
+      std::promise<std::expected<void, std::error_code>> prom;
       auto fut = prom.get_future();
       prom.set_value(std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)});
@@ -1030,7 +1022,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
   auto emitTimeCode(uint8_t timecode) noexcept
-      -> std::expected<std::monostate, std::error_code> override {
+      -> std::expected<void, std::error_code> override {
     std::lock_guard<std::mutex> lock(send_mtx_);
     if (!tcp_backend_) {
       spw_rmap::debug::debug("Not connected");

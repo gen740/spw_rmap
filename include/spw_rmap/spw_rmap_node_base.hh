@@ -38,7 +38,7 @@ class SpwRmapNodeBase {
 
   virtual auto poll() -> std::expected<bool, std::error_code> = 0;
 
-  virtual auto runLoop() -> std::expected<std::monostate, std::error_code> = 0;
+  virtual auto runLoop() -> std::expected<void, std::error_code> = 0;
 
   virtual auto registerOnWrite(std::function<void(Packet)> onWrite) noexcept
       -> void = 0;
@@ -61,7 +61,7 @@ class SpwRmapNodeBase {
       const std::span<const uint8_t> data,
       std::chrono::milliseconds timeout = std::chrono::milliseconds{100},
       std::size_t retry_count = 3) noexcept
-      -> std::expected<std::monostate, std::error_code> = 0;
+      -> std::expected<void, std::error_code> = 0;
 
   /**
    * @brief Reads data from a target node.
@@ -78,7 +78,7 @@ class SpwRmapNodeBase {
       const std::span<uint8_t> data,
       std::chrono::milliseconds timeout = std::chrono::milliseconds{100},
       std::size_t retry_count = 3) noexcept
-      -> std::expected<std::monostate, std::error_code> = 0;
+      -> std::expected<void, std::error_code> = 0;
 
   /**
    * @brief Writes data to a target node.
@@ -94,7 +94,7 @@ class SpwRmapNodeBase {
                           uint32_t memory_address,
                           const std::span<const uint8_t> data,
                           std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<std::monostate, std::error_code>> = 0;
+      -> std::future<std::expected<void, std::error_code>> = 0;
 
   /**
    * @brief Reads data from a target node.
@@ -109,7 +109,7 @@ class SpwRmapNodeBase {
   virtual auto readAsync(std::shared_ptr<TargetNodeBase> target_node,
                          uint32_t memory_address, uint32_t data_length,
                          std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<std::monostate, std::error_code>> = 0;
+      -> std::future<std::expected<void, std::error_code>> = 0;
 
   /**
    * @brief Emits a time code.
@@ -119,7 +119,7 @@ class SpwRmapNodeBase {
    * @param timecode Time code to emit.
    */
   virtual auto emitTimeCode(uint8_t timecode) noexcept
-      -> std::expected<std::monostate, std::error_code> = 0;
+      -> std::expected<void, std::error_code> = 0;
 
   auto setVerifyMode(bool verify_mode) noexcept -> void {
     verify_mode_ = verify_mode;

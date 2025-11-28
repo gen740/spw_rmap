@@ -35,19 +35,19 @@ class MockBackend {
   auto setPort(std::string port) noexcept -> void { port_ = std::move(port); }
 
   auto setSendTimeout(std::chrono::microseconds /*timeout*/) noexcept
-      -> std::expected<std::monostate, std::error_code> {
-    return std::monostate{};
+      -> std::expected<void, std::error_code> {
+    return {};
   }
 
   auto setReceiveTimeout(std::chrono::microseconds /*timeout*/) noexcept
-      -> std::expected<std::monostate, std::error_code> {
-    return std::monostate{};
+      -> std::expected<void, std::error_code> {
+    return {};
   }
 
   auto sendAll(std::span<const uint8_t> data) noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     sent_frames_.emplace_back(data.begin(), data.end());
-    return std::monostate{};
+    return {};
   }
 
   auto recvSome(std::span<uint8_t> buffer) noexcept
@@ -70,28 +70,27 @@ class MockBackend {
     return count;
   }
 
-  auto shutdown() noexcept -> std::expected<std::monostate, std::error_code> {
+  auto shutdown() noexcept -> std::expected<void, std::error_code> {
     {
       std::lock_guard<std::mutex> lock(mtx_);
       shutdown_ = true;
     }
     cv_.notify_all();
-    return std::monostate{};
+    return {};
   }
 
   [[nodiscard]] auto isShutdown() const noexcept -> bool { return shutdown_; }
 
   auto connect(std::chrono::microseconds /*timeout*/) noexcept
-      -> std::expected<std::monostate, std::error_code> {
-    return std::monostate{};
+      -> std::expected<void, std::error_code> {
+    return {};
   }
 
-  auto ensureConnect() noexcept
-      -> std::expected<std::monostate, std::error_code> {
+  auto ensureConnect() noexcept -> std::expected<void, std::error_code> {
     if (shutdown_) {
       shutdown_ = false;
     }
-    return std::monostate{};
+    return {};
   }
 
   void enqueueIncoming(const std::vector<uint8_t>& data) {
@@ -130,8 +129,7 @@ class TestNode : public spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend> {
     backend().enqueueIncoming(frame);
   }
 
-  auto shutdown() noexcept
-      -> std::expected<std::monostate, std::error_code> override {
+  auto shutdown() noexcept -> std::expected<void, std::error_code> override {
     return backend().shutdown();
   }
 

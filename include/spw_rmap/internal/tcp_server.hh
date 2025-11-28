@@ -43,26 +43,26 @@ class TCPServer {
   ~TCPServer() noexcept;
 
   [[nodiscard]] auto accept_once() noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto ensureConnect() noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto setSendTimeout(std::chrono::microseconds timeout) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto setReceiveTimeout(
       std::chrono::microseconds timeout) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto sendAll(std::span<const uint8_t> data) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto recvSome(std::span<uint8_t> buf) noexcept
       -> std::expected<size_t, std::error_code>;
 
   [[nodiscard]] auto shutdown() noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto getIpAddress() const noexcept -> const std::string& {
     return bind_address_;

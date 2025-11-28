@@ -25,7 +25,7 @@ class SpwRmapTCPClient
   bool shutdowned_ = false;
 
   auto connect(std::chrono::microseconds connect_timeout = 100ms)
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     auto res = getBackend_()->connect(connect_timeout);
     shutdowned_ = false;
@@ -42,13 +42,12 @@ class SpwRmapTCPClient
   }
 
   auto setSendTimeout(std::chrono::microseconds timeout) noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     return setSendTimeoutInternal_(timeout);
   }
 
-  auto shutdown() noexcept
-      -> std::expected<std::monostate, std::error_code> override {
+  auto shutdown() noexcept -> std::expected<void, std::error_code> override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     if (getBackend_()) {
       auto res = getBackend_()->shutdown();
@@ -76,7 +75,7 @@ class SpwRmapTCPServer
   std::mutex shutdown_mtx_;
   bool shutdowned_ = false;
 
-  auto acceptOnce() -> std::expected<std::monostate, std::error_code> {
+  auto acceptOnce() -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     auto res = getBackend_()->accept_once();
     if (!res.has_value()) {
@@ -99,13 +98,12 @@ class SpwRmapTCPServer
   }
 
   auto setSendTimeout(std::chrono::microseconds timeout) noexcept
-      -> std::expected<std::monostate, std::error_code> {
+      -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     return setSendTimeoutInternal_(timeout);
   }
 
-  auto shutdown() noexcept
-      -> std::expected<std::monostate, std::error_code> override {
+  auto shutdown() noexcept -> std::expected<void, std::error_code> override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     if (getBackend_()) {
       auto res = getBackend_()->shutdown();

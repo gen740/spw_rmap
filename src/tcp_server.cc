@@ -42,7 +42,7 @@ inline void log_errno_(const char* msg, int err) noexcept {
 }  // namespace
 
 static inline auto set_listening_sockopt(int fd)
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   // Allow quick rebinding after restart.
   int yes = 1;
   (void)::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
@@ -65,7 +65,7 @@ static inline auto set_listening_sockopt(int fd)
 }
 
 static inline auto server_set_sockopts(int fd)
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   int yes = 1;
   // Disable Nagle for latency-sensitive traffic.
   if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0) {
@@ -164,8 +164,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
   return cat;
 }
 
-auto TCPServer::accept_once() noexcept
-    -> std::expected<std::monostate, std::error_code> {
+auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
   addrinfo hints{};
   hints.ai_family = AF_UNSPEC;  // IPv4/IPv6 both
   hints.ai_socktype = SOCK_STREAM;
@@ -179,7 +178,7 @@ auto TCPServer::accept_once() noexcept
     spw_rmap::debug::debug("getaddrinfo error: ", ::gai_strerror(rc));
     return std::unexpected{std::error_code(rc, gai_category())};
   }
-  std::expected<std::monostate, std::error_code> last =
+  std::expected<void, std::error_code> last =
       std::unexpected(std::make_error_code(std::errc::invalid_argument));
 
   for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
@@ -230,21 +229,22 @@ auto TCPServer::accept_once() noexcept
       continue;
     }
 
-    last = internal::server_set_sockopts(client_fd_)
-               .or_else([this](const auto& ec)
-                            -> std::expected<std::monostate, std::error_code> {
-                 close_retry_(listen_fd_);
-                 listen_fd_ = -1;
-                 close_retry_(client_fd_);
-                 client_fd_ = -1;
-                 spw_rmap::debug::debug([ec]() {
-                   std::ostringstream oss;
-                   oss << "Failed to set socket options on accepted socket: "
-                       << ec.message() << " (errno=" << ec.value() << ")";
-                   return oss.str();
-                 }());
-                 return std::unexpected{ec};
-               });
+    last =
+        internal::server_set_sockopts(client_fd_)
+            .or_else(
+                [this](const auto& ec) -> std::expected<void, std::error_code> {
+                  close_retry_(listen_fd_);
+                  listen_fd_ = -1;
+                  close_retry_(client_fd_);
+                  client_fd_ = -1;
+                  spw_rmap::debug::debug([ec]() {
+                    std::ostringstream oss;
+                    oss << "Failed to set socket options on accepted socket: "
+                        << ec.message() << " (errno=" << ec.value() << ")";
+                    return oss.str();
+                  }());
+                  return std::unexpected{ec};
+                });
   }
   ::freeaddrinfo(res);
   if (client_fd_ < 0) {
@@ -257,7 +257,7 @@ auto TCPServer::accept_once() noexcept
 }
 
 auto TCPServer::ensureConnect() noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (client_fd_ >= 0 && socket_alive_(client_fd_)) {
     return {};
   }
@@ -277,7 +277,7 @@ TCPServer::~TCPServer() noexcept {
 }
 
 auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (timeout < std::chrono::microseconds::zero()) {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
@@ -299,7 +299,7 @@ auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
 }
 
 auto TCPServer::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (timeout < std::chrono::microseconds::zero()) {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
@@ -321,7 +321,7 @@ auto TCPServer::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
 }
 
 auto TCPServer::sendAll(std::span<const uint8_t> data) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   while (!data.empty()) {
 #ifndef __APPLE__
     constexpr int kFlags = MSG_NOSIGNAL;
@@ -372,8 +372,7 @@ auto TCPServer::recvSome(std::span<uint8_t> buf) noexcept
   }
 }
 
-auto TCPServer::shutdown() noexcept
-    -> std::expected<std::monostate, std::error_code> {
+auto TCPServer::shutdown() noexcept -> std::expected<void, std::error_code> {
   if (client_fd_ < 0) {
     spw_rmap::debug::debug("Client socket not connected");
     return std::unexpected(
@@ -384,7 +383,7 @@ auto TCPServer::shutdown() noexcept
     log_errno_("Failed to shutdown client socket", err);
     return std::unexpected(std::error_code(err, std::generic_category()));
   }
-  return std::monostate{};
+  return {};
 }
 
 };  // namespace spw_rmap::internal
