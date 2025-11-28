@@ -46,6 +46,9 @@ class SpwRmapNodeBase {
   virtual auto registerOnRead(
       std::function<std::vector<uint8_t>(Packet)> onRead) noexcept -> void = 0;
 
+  virtual auto registerOnTimeCode(
+      std::function<void(uint8_t)> /* onTimeCode */) noexcept -> void {}
+
   /**
    * @brief Writes data to a target node.
    *
