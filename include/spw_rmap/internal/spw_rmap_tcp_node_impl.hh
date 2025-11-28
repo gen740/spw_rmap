@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <string>
 #include <thread>
 #include <type_traits>
@@ -815,85 +816,79 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto write(std::shared_ptr<TargetNodeBase> target_node,
              uint32_t memory_address, const std::span<const uint8_t> data,
-             std::chrono::milliseconds timeout = std::chrono::milliseconds{100},
-             std::size_t retry_count = 3) noexcept
+             std::chrono::milliseconds timeout =
+                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
-    retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
-      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-        if (attempt > 0) {
-          auto ensure_res = ensureConnectionReady_();
-          if (!ensure_res.has_value()) {
-            last_error = ensure_res.error();
-            continue;
-          }
-        }
-        auto recv_timeout_res = tcp_backend_->setReceiveTimeout(timeout);
-        if (!recv_timeout_res.has_value()) {
-          return std::unexpected{recv_timeout_res.error()};
-        }
-        auto transaction_id_res = transaction_id_database_.acquire();
-        if (!transaction_id_res.has_value()) {
-          spw_rmap::debug::debug(
-              "Failed to get available Transaction ID for write(): ",
-              transaction_id_res.error().message());
-          last_error = transaction_id_res.error();
-          continue;
-        }
-        const auto transaction_id = *transaction_id_res;
-        Defer release_tx_id{[this, transaction_id]() noexcept -> void {
-          transaction_id_database_.release(transaction_id);
-        }};
-        {
-          auto send_res = sendWritePacket_(target_node, transaction_id,
-                                           memory_address, data);
-          if (!send_res.has_value()) {
-            last_error = send_res.error();
-            continue;
-          }
-        }
-        auto recv_res = recvAndParseOnePacket_();
-        if (!recv_res.has_value()) {
-          spw_rmap::debug::debug("Error in receiving/parsing packet: ",
-                                 recv_res.error().message());
-          last_error = recv_res.error();
-          continue;
-        }
-        if (recv_res.value() == 0) {
-          auto shutdown_res = shutdown();
-          if (!shutdown_res.has_value()) {
-            spw_rmap::debug::debug("Error in shutdown after recv returning 0: ",
-                                   shutdown_res.error().message());
-            return std::unexpected{shutdown_res.error()};
-          }
-          return std::unexpected{
-              std::make_error_code(std::errc::not_connected)};
-        }
-        auto& packet = packet_parser_.getPacket();
-        if (packet.type == PacketType::WriteReply &&
-            packet.transactionID == transaction_id) {
-          return {};
-        }
-        last_error = std::make_error_code(std::errc::bad_message);
-      }
+      int32_t transaction_id_memo = -1;
+      return ensureConnectionReady_()
+          .and_then([this, &timeout]() -> std::expected<void, std::error_code> {
+            return tcp_backend_->setReceiveTimeout(timeout);
+          })
+          .and_then([this, &target_node, &memory_address,
+                     &data]() -> std::expected<uint16_t, std::error_code> {
+            return transaction_id_database_.acquire();
+          })
+          .and_then([this, &target_node, &memory_address, &data,
+                     &transaction_id_memo](uint16_t transaction_id)
+                        -> std::expected<void, std::error_code> {
+            transaction_id_memo = transaction_id;
+            return sendWritePacket_(target_node, transaction_id, memory_address,
+                                    data);
+          })
+          .and_then([this, &target_node, &memory_address,
+                     &data]() -> std::expected<std::size_t, std::error_code> {
+            return recvAndParseOnePacket_();
+          })
+          .and_then([this, &transaction_id_memo](std::size_t byte_received)
+                        -> std::expected<void, std::error_code> {
+            transaction_id_database_.release(
+                static_cast<uint16_t>(transaction_id_memo));
+            if (byte_received == 0) {
+              return std::unexpected{
+                  std::make_error_code(std::errc::not_connected)};
+            } else {
+              auto& packet = packet_parser_.getPacket();
+              if (packet.transactionID !=
+                  static_cast<uint16_t>(transaction_id_memo)) {
+                spw_rmap::debug::debug(
+                    "Received packet with unexpected Transaction ID: ",
+                    packet.transactionID);
+                return std::unexpected{
+                    std::make_error_code(std::errc::bad_message)};
+              }
+              if (packet.type == PacketType::WriteReply) {
+                return {};
+              } else {
+                return std::unexpected{
+                    std::make_error_code(std::errc::bad_message)};
+              }
+            }
+          })
+          .or_else([this, &transaction_id_memo](std::error_code ec)
+                       -> std::expected<void, std::error_code> {
+            if (transaction_id_memo >= 0) {
+              transaction_id_database_.release(
+                  static_cast<uint16_t>(transaction_id_memo));
+            }
+            return std::unexpected{ec};
+          });
     } else {
-      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-        auto async_op =
-            startWriteAsyncOperation_(target_node, memory_address, data,
-                                      [](const Packet&) noexcept -> void {});
-        if (async_op.future.wait_for(timeout) == std::future_status::ready) {
-          auto res = async_op.future.get();
-          if (!res.has_value()) {
-            return std::unexpected{res.error()};
-          }
-          return {};
+      auto async_op =
+          startWriteAsyncOperation_(target_node, memory_address, data,
+                                    [](const Packet&) noexcept -> void {});
+      if (async_op.future.wait_for(timeout) == std::future_status::ready) {
+        auto res = async_op.future.get();
+        if (!res.has_value()) {
+          return std::unexpected{res.error()};
         }
-        if (async_op.transaction_id.has_value()) {
-          transaction_id_database_.release(*async_op.transaction_id);
-        }
-        last_error = std::make_error_code(std::errc::timed_out);
+        return {};
       }
+      if (async_op.transaction_id.has_value()) {
+        transaction_id_database_.release(*async_op.transaction_id);
+      }
+      last_error = std::make_error_code(std::errc::timed_out);
     }
     return std::unexpected{last_error};
   }
@@ -916,90 +911,94 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto read(std::shared_ptr<TargetNodeBase> target_node,
             uint32_t memory_address, const std::span<uint8_t> data,
-            std::chrono::milliseconds timeout = std::chrono::milliseconds{100},
-            std::size_t retry_count = 3) noexcept
+            std::chrono::milliseconds timeout =
+                std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
-    retry_count = retry_count == 0 ? 1 : retry_count;
     std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
-      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-        if (attempt > 0) {
-          auto ensure_res = ensureConnectionReady_();
-          if (!ensure_res.has_value()) {
-            last_error = ensure_res.error();
-            continue;
-          }
-        }
-        auto recv_timeout_res = tcp_backend_->setReceiveTimeout(timeout);
-        if (!recv_timeout_res.has_value()) {
-          return std::unexpected{recv_timeout_res.error()};
-        }
-        auto transaction_id_res = transaction_id_database_.acquire();
-        if (!transaction_id_res.has_value()) {
-          spw_rmap::debug::debug(
-              "Failed to get available Transaction ID for read(): ",
-              transaction_id_res.error().message());
-          last_error = transaction_id_res.error();
-          continue;
-        }
-        const auto transaction_id = *transaction_id_res;
-        Defer release_tx_id{[this, transaction_id]() noexcept -> void {
-          transaction_id_database_.release(transaction_id);
-        }};
-        auto send_res = sendReadPacket_(std::move(target_node), transaction_id,
-                                        memory_address, data.size());
-        if (!send_res.has_value()) {
-          last_error = send_res.error();
-          continue;
-        }
-        auto recv_res = recvAndParseOnePacket_();
-        if (!recv_res.has_value()) {
-          spw_rmap::debug::debug("Error in receiving/parsing packet: ",
-                                 recv_res.error().message());
-          last_error = recv_res.error();
-          continue;
-        }
-        if (recv_res.value() == 0) {
-          auto shutdown_res = shutdown();
-          if (!shutdown_res.has_value()) {
-            spw_rmap::debug::debug("Error in shutdown after recv returning 0: ",
-                                   shutdown_res.error().message());
-            return std::unexpected{shutdown_res.error()};
-          }
-          return std::unexpected{
-              std::make_error_code(std::errc::not_connected)};
-        }
-        auto& packet = packet_parser_.getPacket();
-        if (packet.type == PacketType::ReadReply &&
-            packet.transactionID == transaction_id) {
-          if (packet.data.size() < data.size()) {
-            last_error = std::make_error_code(std::errc::message_size);
-            continue;
-          }
-          std::ranges::copy(packet.data, data.begin());
-          return {};
-        }
-        last_error = std::make_error_code(std::errc::bad_message);
-      }
+      int32_t transaction_id_memo = -1;
+      return ensureConnectionReady_()
+          .and_then([this, &timeout]() -> std::expected<void, std::error_code> {
+            return tcp_backend_->setReceiveTimeout(timeout);
+          })
+          .and_then([this, &target_node, &memory_address,
+                     &data]() -> std::expected<uint16_t, std::error_code> {
+            return transaction_id_database_.acquire();
+          })
+          .and_then([this, &target_node, &memory_address, &data,
+                     &transaction_id_memo](uint16_t transaction_id)
+                        -> std::expected<void, std::error_code> {
+            transaction_id_memo = transaction_id;
+            return sendReadPacket_(target_node, transaction_id, memory_address,
+                                   data.size());
+          })
+          .and_then([this, &target_node, &memory_address,
+                     &data]() -> std::expected<std::size_t, std::error_code> {
+            return recvAndParseOnePacket_();
+          })
+          .and_then(
+              [this, &transaction_id_memo, &data](std::size_t byte_received)
+                  -> std::expected<void, std::error_code> {
+                transaction_id_database_.release(
+                    static_cast<uint16_t>(transaction_id_memo));
+                if (byte_received == 0) {
+                  return std::unexpected{
+                      std::make_error_code(std::errc::not_connected)};
+                } else {
+                  auto& packet = packet_parser_.getPacket();
+                  if (packet.transactionID !=
+                      static_cast<uint16_t>(transaction_id_memo)) {
+                    spw_rmap::debug::debug(
+                        "Received packet with unexpected Transaction ID: ",
+                        packet.transactionID);
+                    return std::unexpected{
+                        std::make_error_code(std::errc::bad_message)};
+                  }
+                  if (packet.type == PacketType::ReadReply) {
+                    transaction_id_database_.release(
+                        static_cast<uint16_t>(transaction_id_memo));
+                    if (packet.dataLength != data.size() ||
+                        packet.data.size() != data.size()) {
+                      spw_rmap::debug::debug(
+                          "Received Read Reply packet with unexpected data "
+                          "length: ",
+                          packet.dataLength);
+                      return std::unexpected{
+                          std::make_error_code(std::errc::bad_message)};
+                    }
+                    std::ranges::copy(packet.data, data.begin());
+                    return {};
+                  } else {
+                    return std::unexpected{
+                        std::make_error_code(std::errc::bad_message)};
+                  }
+                }
+              })
+          .or_else([this, &transaction_id_memo](std::error_code ec)
+                       -> std::expected<void, std::error_code> {
+            if (transaction_id_memo >= 0) {
+              transaction_id_database_.release(
+                  static_cast<uint16_t>(transaction_id_memo));
+            }
+            return std::unexpected{ec};
+          });
     } else {
-      for (std::size_t attempt = 0; attempt < retry_count; ++attempt) {
-        auto async_op = startReadAsyncOperation_(
-            std::move(target_node), memory_address, data.size(),
-            [data](const Packet& packet) noexcept -> void {
-              std::copy_n(packet.data.data(), data.size(), data.data());
-            });
-        if (async_op.future.wait_for(timeout) == std::future_status::ready) {
-          auto res = async_op.future.get();
-          if (!res.has_value()) {
-            return std::unexpected{res.error()};
-          }
-          return {};
+      auto async_op = startReadAsyncOperation_(
+          std::move(target_node), memory_address, data.size(),
+          [data](const Packet& packet) noexcept -> void {
+            std::copy_n(packet.data.data(), data.size(), data.data());
+          });
+      if (async_op.future.wait_for(timeout) == std::future_status::ready) {
+        auto res = async_op.future.get();
+        if (!res.has_value()) {
+          return std::unexpected{res.error()};
         }
-        if (async_op.transaction_id.has_value()) {
-          transaction_id_database_.release(*async_op.transaction_id);
-        }
-        last_error = std::make_error_code(std::errc::timed_out);
+        return {};
       }
+      if (async_op.transaction_id.has_value()) {
+        transaction_id_database_.release(*async_op.transaction_id);
+      }
+      last_error = std::make_error_code(std::errc::timed_out);
     }
     return std::unexpected{last_error};
   }

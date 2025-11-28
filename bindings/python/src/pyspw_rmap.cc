@@ -55,7 +55,7 @@ class PySpwRmapTCPNode {
         static_cast<uint8_t>(target_node.logical_address),
         std::move(target_node.target_spacewire_address),
         std::move(target_node.reply_address));
-    auto res = node_.read(target_node_ptr, memory_adderss, data, 100ms, 3);
+    auto res = node_.read(target_node_ptr, memory_adderss, data, 100ms);
     if (!res) {
       throw std::system_error(res.error());
     }
@@ -68,7 +68,7 @@ class PySpwRmapTCPNode {
         static_cast<uint8_t>(target_node.logical_address),
         std::move(target_node.target_spacewire_address),
         std::move(target_node.reply_address));
-    auto res = node_.write(target_node_ptr, memory_adderss, data, 100ms, 3);
+    auto res = node_.write(target_node_ptr, memory_adderss, data, 100ms);
     if (!res) {
       throw std::system_error(res.error());
     }
@@ -102,7 +102,9 @@ PYBIND11_MODULE(_core, m) {
 
   m.def(
       "set_debug_enabled",
-      [](bool enabled) { spw_rmap::debug::set_runtime_enabled(enabled); },
+      [](bool enabled) -> void {
+        spw_rmap::debug::set_runtime_enabled(enabled);
+      },
       py::arg("enabled"), "Enable or disable runtime debug logging");
   m.def(
       "enable_debug", []() { spw_rmap::debug::enable(); },
