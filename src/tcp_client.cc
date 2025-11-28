@@ -52,7 +52,7 @@ static auto close_retry_(int fd) noexcept -> void {
 static auto connect_with_timeout_(const int fd, const sockaddr* addr,
                                   socklen_t addrlen,
                                   std::chrono::microseconds timeout) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (timeout < std::chrono::microseconds::zero()) {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
@@ -141,7 +141,7 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
 }
 
 static auto set_sockopts(int fd) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   int yes = 1;
   if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0) {
     const int err = errno;
@@ -229,7 +229,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
 
 [[nodiscard]] auto TCPClient::connect(
     std::chrono::microseconds timeout) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (fd_ >= 0) {
     spw_rmap::debug::debug("Already connected");
     return std::unexpected{std::make_error_code(std::errc::already_connected)};
@@ -253,7 +253,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
     }
   }
 
-  std::expected<std::monostate, std::error_code> last =
+  std::expected<void, std::error_code> last =
       std::unexpected(std::make_error_code(std::errc::invalid_argument));
 
   for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
@@ -266,8 +266,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
       fd_ = -1;
       continue;
     }
-    last = internal::set_sockopts(fd_).and_then([this, timeout,
-                                                 ai](auto) -> auto {
+    last = internal::set_sockopts(fd_).and_then([this, timeout, ai]() -> auto {
       return connect_with_timeout_(fd_, ai->ai_addr, ai->ai_addrlen, timeout);
     });
     if (!last.has_value()) {
@@ -286,7 +285,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
 }
 
 auto TCPClient::ensureConnect(std::chrono::microseconds timeout) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (fd_ >= 0 && socket_alive_(fd_)) {
     return {};
   }
@@ -303,7 +302,7 @@ auto TCPClient::disconnect() noexcept -> void {
 }
 
 auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (timeout < std::chrono::microseconds::zero()) {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
@@ -325,7 +324,7 @@ auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
 }
 
 auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (timeout < std::chrono::microseconds::zero()) {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
@@ -345,7 +344,7 @@ auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
 }
 
 auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
-    -> std::expected<std::monostate, std::error_code> {
+    -> std::expected<void, std::error_code> {
   if (fd_ < 0) {
     spw_rmap::debug::debug("Not connected");
     return std::unexpected{std::make_error_code(std::errc::not_connected)};
@@ -436,8 +435,7 @@ auto TCPClient::recvSome(std::span<uint8_t> buf) noexcept
   }
 }
 
-auto TCPClient::shutdown() noexcept
-    -> std::expected<std::monostate, std::error_code> {
+auto TCPClient::shutdown() noexcept -> std::expected<void, std::error_code> {
   if (fd_ < 0) {
     spw_rmap::debug::debug("Not connected");
     return std::unexpected(
@@ -448,7 +446,7 @@ auto TCPClient::shutdown() noexcept
     log_errno_("Shutdown failed", err);
     return std::unexpected(std::error_code(err, std::generic_category()));
   }
-  return std::monostate{};
+  return {};
 }
 
 }  // namespace spw_rmap::internal

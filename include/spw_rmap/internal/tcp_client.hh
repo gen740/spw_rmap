@@ -39,29 +39,29 @@ class TCPClient {
   ~TCPClient();
 
   [[nodiscard]] auto connect(std::chrono::microseconds timeout = 500ms) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto ensureConnect(
       std::chrono::microseconds timeout = 500ms) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   auto disconnect() noexcept -> void;
 
   [[nodiscard]] auto setSendTimeout(std::chrono::microseconds timeout) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto setReceiveTimeout(
       std::chrono::microseconds timeout) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto sendAll(std::span<const uint8_t> data) noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto recvSome(std::span<uint8_t> buf) noexcept
       -> std::expected<size_t, std::error_code>;
 
   [[nodiscard]] auto shutdown() noexcept
-      -> std::expected<std::monostate, std::error_code>;
+      -> std::expected<void, std::error_code>;
 
   [[nodiscard]] auto getIpAddress() const noexcept -> const std::string& {
     return ip_address_;
