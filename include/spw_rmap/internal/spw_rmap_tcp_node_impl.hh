@@ -113,6 +113,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   std::function<void(Packet)> on_write_callback_ = nullptr;
   std::function<std::vector<uint8_t>(Packet)> on_read_callback_ = nullptr;
+  std::function<void(uint8_t)> on_timecode_callback_ = nullptr;
 
   std::atomic<bool> auto_polling_mode_{false};
 
@@ -458,6 +459,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             return std::unexpected{
                 std::make_error_code(std::errc::bad_message)};
           }
+          on_timecode_callback_(tc.at(0) & 0x3F);
         } break;
         default:
           spw_rmap::debug::debug("Received packet with unknown type byte: ",
@@ -804,6 +806,11 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       std::function<std::vector<uint8_t>(Packet)> onRead) noexcept
       -> void override {
     on_read_callback_ = std::move(onRead);
+  }
+
+  auto registerOnTimeCode(std::function<void(uint8_t)> onTimeCode) noexcept
+      -> void override {
+    on_timecode_callback_ = std::move(onTimeCode);
   }
 
   auto setTimeout(std::chrono::milliseconds timeout) noexcept -> void {
