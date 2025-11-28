@@ -227,7 +227,7 @@ TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
   std::array<uint8_t, 2> payload{0x01, 0x02};
 
   auto timeout_result =
-      node.write(target_node, 0x2000, payload, std::chrono::milliseconds(1), 1);
+      node.write(target_node, 0x2000, payload, std::chrono::milliseconds(1));
   ASSERT_FALSE(timeout_result.has_value());
   EXPECT_EQ(timeout_result.error(), std::make_error_code(std::errc::timed_out));
 

@@ -40,7 +40,7 @@ The resulting package exposes `_core.SpwRmapTCPNode` mirroring the C++ API.
 
 - `target_node`: abstraction describing a SpaceWire node address (logical address, SpaceWire hop list, reply path). Implemented by `TargetNodeBase` with fixed/dynamic variants so the same transport can talk to different hardware endpoints.
 - `tcp_node`: the SpaceWire-over-TCP bridge (`SpwRmapTCPClient`/`SpwRmapTCPServer`) that owns the sockets, buffers, and RMAP transaction management.
-- `write` / `read`: synchronous helpers that perform the transaction, block until a reply arrives (or timeout/retry), and return `std::expected` success/error codes.
+- `write` / `read`: synchronous helpers that perform the transaction, block until a reply arrives (or timeout happens), and return `std::expected` success/error codes.
 - `writeAsync` / `readAsync`: asynchronous variants returning `std::future` that resolve when the reply is received; they invoke user-supplied callbacks before fulfilling the future so event-driven integrations can react immediately.
 
 See `examples/spwrmap_example_sync.cc`, `examples/spwrmap_example_async.cc` (C++), and `examples/spwrmap_example.py` (Python) for minimal workflows demonstrating how to connect, construct a target node, and issue read/write RMAP commands.
@@ -127,7 +127,7 @@ auto write_future =
 write_future.get().value();
 ```
 
-`write`/`read` are *synchronous*: they transmit the command, block until a reply is parsed (with retries/timeouts handled internally), and return `std::expected`.  
+`write`/`read` are *synchronous*: they transmit the command, block until a reply is parsed (or the timeout fires), and return `std::expected`.  
 `writeAsync`/`readAsync` are *asynchronous*: they enqueue the transaction, immediately return a `std::future`, and invoke the supplied callback as soon as the reply arrives—before the future resolves—allowing low-latency event handling.
 
 ## Python
@@ -166,7 +166,7 @@ If you prefer explicit lifecycle management, call `node.shutdown()` yourself or 
 
 ## Timeouts and Error Handling
 
-- `write` / `read` accept a `timeout` (default 100 ms) and a `retry_count`. When the timeout expires the pending transaction is cancelled internally, its transaction ID is released, and the call returns `std::errc::timed_out`. This prevents deadlocks when a remote node never replies.
+- `write` / `read` accept a `timeout` (default 100 ms). When the timeout expires the pending transaction is cancelled internally, its transaction ID is released, and the call returns `std::errc::timed_out`. This prevents deadlocks when a remote node never replies.
 
 - Asynchronous APIs propagate callback failures: if the function you pass to `writeAsync` / `readAsync` throws, the exception is caught by the library, the transaction is cancelled, and the returned `std::future` resolves to `std::errc::operation_canceled`. This keeps the polling loop alive and makes the failure visible to the caller. Catch exceptions inside your callback if you want to mark the operation successful despite local errors.
 
