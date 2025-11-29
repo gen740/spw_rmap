@@ -2,7 +2,6 @@
 #include <gtest/gtest-matchers.h>
 #include <gtest/gtest.h>
 
-#include <array>
 #include <random>
 #include <spw_rmap/packet_builder.hh>
 #include <spw_rmap/packet_parser.hh>
@@ -98,11 +97,10 @@ TEST(spw_rmap, ReadPacket) {
 
     auto res = spw_rmap::BuildReadPacket(c, packet);
     ASSERT_TRUE(res.has_value());
-    auto parser = PacketParser();
-    auto parsed = parser.parse(packet);
-    ASSERT_TRUE(parsed == PacketParser::Status::Success);
+    auto parsed = ParseRMAPPacket(packet);
+    ASSERT_TRUE(parsed.has_value());
 
-    auto d = parser.getPacket();
+    auto d = parsed.value();
     EXPECT_TRUE(SpanEqual(d.targetSpaceWireAddress, c.targetSpaceWireAddress));
     EXPECT_TRUE(SpanEqual(d.replyAddress, c.replyAddress));
     EXPECT_EQ(d.targetLogicalAddress, c.targetLogicalAddress);
@@ -140,7 +138,7 @@ TEST(spw_rmap, ReadReplyPacket) {
 
     auto c = ReadReplyPacketConfig{
         .replyAddress = node.getReplyAddress(),
-        .status = random_byte(),
+        .status = static_cast<PacketStatusCode>(random_byte()),
         .targetLogicalAddress = node.getTargetLogicalAddress(),
         .transactionID =
             static_cast<uint16_t>(random_byte() << 8 | random_byte()),
@@ -153,11 +151,10 @@ TEST(spw_rmap, ReadReplyPacket) {
 
     auto res = spw_rmap::BuildReadReplyPacket(c, packet);
     ASSERT_TRUE(res.has_value());
-    auto parser = PacketParser();
-    auto parsed = parser.parse(packet);
-    ASSERT_TRUE(parsed == PacketParser::Status::Success);
+    auto parsed = ParseRMAPPacket(packet);
+    ASSERT_TRUE(parsed.has_value());
 
-    auto d = parser.getPacket();
+    auto d = parsed.value();
     EXPECT_TRUE(SpanEqual(d.replyAddress, c.replyAddress));
     EXPECT_EQ(d.status, c.status);
     EXPECT_EQ(d.targetLogicalAddress, c.targetLogicalAddress);
@@ -209,11 +206,10 @@ TEST(spw_rmap, WritePacket) {
 
     auto res = spw_rmap::BuildWritePacket(c, packet);
     ASSERT_TRUE(res.has_value());
-    auto parser = PacketParser();
-    auto parsed = parser.parse(packet);
-    ASSERT_TRUE(parsed == PacketParser::Status::Success);
+    auto parsed = ParseRMAPPacket(packet);
+    ASSERT_TRUE(parsed.has_value());
 
-    auto d = parser.getPacket();
+    auto d = parsed.value();
     EXPECT_TRUE(SpanEqual(d.targetSpaceWireAddress, c.targetSpaceWireAddress));
     EXPECT_TRUE(SpanEqual(d.replyAddress, c.replyAddress));
     EXPECT_EQ(d.targetLogicalAddress, c.targetLogicalAddress);
@@ -245,7 +241,7 @@ TEST(spw_rmap, WriteReplyPacket) {
     auto c = WriteReplyPacketConfig{
         .replyAddress = node.getReplyAddress(),
         .initiatorLogicalAddress = random_logical_address(),
-        .status = random_byte(),
+        .status = static_cast<PacketStatusCode>(random_byte()),
         .targetLogicalAddress = node.getTargetLogicalAddress(),
         .transactionID =
             static_cast<uint16_t>(random_byte() << 8 | random_byte()),
@@ -258,11 +254,10 @@ TEST(spw_rmap, WriteReplyPacket) {
 
     auto res = spw_rmap::BuildWriteReplyPacket(c, packet);
     ASSERT_TRUE(res.has_value());
-    auto parser = PacketParser();
-    auto parsed = parser.parse(packet);
-    ASSERT_TRUE(parsed == PacketParser::Status::Success);
+    auto parsed = ParseRMAPPacket(packet);
+    ASSERT_TRUE(parsed.has_value());
 
-    auto d = parser.getPacket();
+    auto d = parsed.value();
     EXPECT_TRUE(SpanEqual(d.replyAddress, c.replyAddress));
     EXPECT_EQ(d.initiatorLogicalAddress, c.initiatorLogicalAddress);
     EXPECT_EQ(d.status, c.status);
@@ -271,90 +266,4 @@ TEST(spw_rmap, WriteReplyPacket) {
     EXPECT_EQ(d.type, PacketType::WriteReply);
     EXPECT_EQ(d.instruction & 0b00000100, c.incrementMode ? 0b00000100 : 0);
   }
-}
-
-TEST(spw_rmap, ParseReadPacketDirectly) {
-  using namespace spw_rmap;
-
-  std::vector<uint8_t> target_address{3, 5, 7};
-  std::vector<uint8_t> reply_address{9, 11, 13};
-
-  TargetNodeDynamic node(0x34, std::move(target_address),
-                         std::move(reply_address));
-
-  auto config = ReadPacketConfig{
-      .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
-      .replyAddress = node.getReplyAddress(),
-      .targetLogicalAddress = node.getTargetLogicalAddress(),
-      .initiatorLogicalAddress = 0xA1,
-      .transactionID = 0x1234,
-      .extendedAddress = 0x02,
-      .address = 0x01020304,
-      .dataLength = 32,
-      .key = 0x55,
-      .incrementMode = true,
-  };
-
-  std::vector<uint8_t> packet(config.expectedSize());
-  ASSERT_TRUE(BuildReadPacket(config, packet).has_value());
-
-  PacketParser parser;
-  const auto status = parser.parseReadPacket(
-      std::span(packet).subspan(node.getTargetSpaceWireAddress().size()));
-  ASSERT_EQ(status, PacketParser::Status::Success);
-
-  const auto& parsed = parser.getPacket();
-  EXPECT_TRUE(SpanEqual(parsed.replyAddress, config.replyAddress));
-  EXPECT_EQ(parsed.targetLogicalAddress, config.targetLogicalAddress);
-  EXPECT_EQ(parsed.initiatorLogicalAddress, config.initiatorLogicalAddress);
-  EXPECT_EQ(parsed.transactionID, config.transactionID);
-  EXPECT_EQ(parsed.extendedAddress, config.extendedAddress);
-  EXPECT_EQ(parsed.address, config.address);
-  EXPECT_EQ(parsed.dataLength, config.dataLength);
-  EXPECT_EQ(parsed.key, config.key);
-}
-
-TEST(spw_rmap, ParseWritePacketDirectly) {
-  using namespace spw_rmap;
-
-  std::vector<uint8_t> target_address{1, 2};
-  std::vector<uint8_t> reply_address{3, 4, 5, 6};
-
-  TargetNodeDynamic node(0x56, std::move(target_address),
-                         std::move(reply_address));
-
-  std::array<uint8_t, 8> payload{0, 1, 2, 3, 4, 5, 6, 7};
-
-  auto config = WritePacketConfig{
-      .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
-      .replyAddress = node.getReplyAddress(),
-      .targetLogicalAddress = node.getTargetLogicalAddress(),
-      .initiatorLogicalAddress = 0xB2,
-      .transactionID = 0x4321,
-      .key = 0xAA,
-      .extendedAddress = 0x01,
-      .address = 0x0A0B0C0D,
-      .incrementMode = false,
-      .reply = true,
-      .verifyMode = true,
-      .data = payload,
-  };
-
-  std::vector<uint8_t> packet(config.expectedSize());
-  ASSERT_TRUE(spw_rmap::BuildWritePacket(config, packet).has_value());
-
-  PacketParser parser;
-  const auto status = parser.parseWritePacket(
-      std::span(packet).subspan(node.getTargetSpaceWireAddress().size()));
-  ASSERT_EQ(status, PacketParser::Status::Success);
-
-  const auto& parsed = parser.getPacket();
-  EXPECT_TRUE(SpanEqual(parsed.replyAddress, config.replyAddress));
-  EXPECT_EQ(parsed.targetLogicalAddress, config.targetLogicalAddress);
-  EXPECT_EQ(parsed.initiatorLogicalAddress, config.initiatorLogicalAddress);
-  EXPECT_EQ(parsed.transactionID, config.transactionID);
-  EXPECT_EQ(parsed.key, config.key);
-  EXPECT_EQ(parsed.extendedAddress, config.extendedAddress);
-  EXPECT_EQ(parsed.address, config.address);
-  EXPECT_TRUE(SpanEqual(parsed.data, config.data));
 }

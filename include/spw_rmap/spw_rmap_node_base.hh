@@ -11,7 +11,6 @@
 #include <memory>
 #include <span>
 #include <system_error>
-#include <variant>
 
 #include "spw_rmap/packet_parser.hh"
 #include "spw_rmap/target_node.hh"
@@ -36,7 +35,7 @@ class SpwRmapNodeBase {
   SpwRmapNodeBase(SpwRmapNodeBase&&) = delete;
   auto operator=(SpwRmapNodeBase&&) -> SpwRmapNodeBase& = delete;
 
-  virtual auto poll() -> std::expected<bool, std::error_code> = 0;
+  virtual auto poll() -> std::expected<void, std::error_code> = 0;
 
   virtual auto runLoop() -> std::expected<void, std::error_code> = 0;
 

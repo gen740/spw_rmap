@@ -8,6 +8,8 @@
 #include <span>
 #include <system_error>
 
+#include "spw_rmap/packet_parser.hh"
+
 namespace spw_rmap {
 
 struct ReadPacketConfig {
@@ -52,7 +54,7 @@ struct WritePacketConfig {
 struct ReadReplyPacketConfig {
   std::span<const uint8_t> replyAddress;
   uint8_t initiatorLogicalAddress{0xFE};
-  uint8_t status{0};
+  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
   uint8_t targetLogicalAddress{0};
   uint16_t transactionID{0};
   std::span<const uint8_t> data;
@@ -66,7 +68,7 @@ struct ReadReplyPacketConfig {
 struct WriteReplyPacketConfig {
   std::span<const uint8_t> replyAddress;
   uint8_t initiatorLogicalAddress{0xFE};
-  uint8_t status{0};
+  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
   uint8_t targetLogicalAddress{0};
   uint16_t transactionID{0};
   bool incrementMode{true};

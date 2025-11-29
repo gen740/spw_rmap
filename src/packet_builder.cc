@@ -158,7 +158,7 @@ auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
     }
     out[head++] = (instruction);
   }
-  out[head++] = (config.status);
+  out[head++] = static_cast<uint8_t>(config.status);
   out[head++] = (config.targetLogicalAddress);
   out[head++] = (static_cast<uint8_t>(config.transactionID >> 8));
   out[head++] = (static_cast<uint8_t>(config.transactionID & 0xFF));
@@ -206,7 +206,7 @@ auto BuildWriteReplyPacket(const WriteReplyPacketConfig& config,
     }
     out[head++] = (instruction);
   }
-  out[head++] = (config.status);
+  out[head++] = static_cast<uint8_t>(config.status);
   out[head++] = (config.targetLogicalAddress);
   out[head++] = (static_cast<uint8_t>(config.transactionID >> 8));
   out[head++] = (static_cast<uint8_t>(config.transactionID & 0xFF));

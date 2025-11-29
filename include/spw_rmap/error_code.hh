@@ -2,10 +2,20 @@
 // Licensed under the MIT License. See LICENSE file for details.
 #pragma once
 
-#include <spw_rmap/packet_parser.hh>
 #include <system_error>
 
 namespace spw_rmap {
+
+enum class ParseStatus {
+  Success = 0,
+  InvalidPacket = 2,
+  HeaderCRCError = 3,
+  DataCRCError = 4,
+  IncompletePacket = 5,
+  NotReplyPacket = 6,
+  PacketStatusError = 7,
+  UnknownProtocolIdentifier = 8,
+};
 
 class StatusCodeCategory final : public std::error_category {
  public:
@@ -14,22 +24,22 @@ class StatusCodeCategory final : public std::error_category {
   }
 
   [[nodiscard]] auto message(int ev) const -> std::string override {
-    switch (static_cast<PacketParser::Status>(ev)) {
-      case PacketParser::Status::Success:
+    switch (static_cast<ParseStatus>(ev)) {
+      case ParseStatus::Success:
         return "Success";
-      case PacketParser::Status::InvalidPacket:
+      case ParseStatus::InvalidPacket:
         return "Invalid packet";
-      case PacketParser::Status::HeaderCRCError:
+      case ParseStatus::HeaderCRCError:
         return "Header CRC error";
-      case PacketParser::Status::DataCRCError:
+      case ParseStatus::DataCRCError:
         return "Data CRC error";
-      case PacketParser::Status::IncompletePacket:
+      case ParseStatus::IncompletePacket:
         return "Incomplete packet";
-      case PacketParser::Status::NotReplyPacket:
+      case ParseStatus::NotReplyPacket:
         return "Not a reply packet";
-      case PacketParser::Status::PacketStatusError:
+      case ParseStatus::PacketStatusError:
         return "Packet status error";
-      case PacketParser::Status::UnknownProtocolIdentifier:
+      case ParseStatus::UnknownProtocolIdentifier:
         return "Unknown protocol identifier";
       default:
         return "Unknown status code";
@@ -42,8 +52,7 @@ inline auto status_code_category() noexcept -> const std::error_category& {
   return instance;
 }
 
-inline auto make_error_code(PacketParser::Status e) noexcept
-    -> std::error_code {
+inline auto make_error_code(ParseStatus e) noexcept -> std::error_code {
   return {static_cast<int>(e), status_code_category()};
 }
 
@@ -52,6 +61,6 @@ inline auto make_error_code(PacketParser::Status e) noexcept
 namespace std {
 
 template <>
-struct is_error_code_enum<spw_rmap::PacketParser::Status> : true_type {};
+struct is_error_code_enum<spw_rmap::ParseStatus> : true_type {};
 
 }  // namespace std
