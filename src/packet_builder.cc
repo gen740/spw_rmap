@@ -11,17 +11,10 @@
 
 namespace spw_rmap {
 
-auto ReadPacketBuilder::getTotalSize(
-    const ReadPacketConfig& config) const noexcept -> size_t {
-  return config.targetSpaceWireAddress.size() + 4 +
-         ((config.replyAddress.size() + 3) / 4 * 4) +  // Reply address
-         12;
-}
-
 auto ReadPacketBuilder::build(const ReadPacketConfig& config,
                               std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
-  if (out.size() < getTotalSize(config)) {
+  if (out.size() < config.expectedSize()) [[unlikely]] {
     spw_rmap::debug::debug("ReadPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
@@ -71,17 +64,10 @@ auto ReadPacketBuilder::build(const ReadPacketConfig& config,
   return head;
 };
 
-auto WritePacketBuilder::getTotalSize(
-    const WritePacketConfig& config) const noexcept -> size_t {
-  return config.targetSpaceWireAddress.size() + 4 +
-         ((config.replyAddress.size() + 3) / 4 * 4) + 12 + config.data.size() +
-         1;
-}
-
 auto WritePacketBuilder::build(const WritePacketConfig& config,
                                std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
-  if (out.size() < getTotalSize(config)) {
+  if (out.size() < config.expectedSize()) [[unlikely]] {
     spw_rmap::debug::debug("WritePacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
@@ -150,15 +136,10 @@ auto WritePacketBuilder::build(const WritePacketConfig& config,
   return head;
 };
 
-auto WriteReplyPacketBuilder::getTotalSize(
-    const WriteReplyPacketConfig& config) const noexcept -> size_t {
-  return config.replyAddress.size() + 8;
-}
-
 auto WriteReplyPacketBuilder::build(const WriteReplyPacketConfig& config,
                                     std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
-  if (out.size() < getTotalSize(config)) {
+  if (out.size() < config.expectedSize()) [[unlikely]] {
     spw_rmap::debug::debug("WriteReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
@@ -191,15 +172,10 @@ auto WriteReplyPacketBuilder::build(const WriteReplyPacketConfig& config,
   return head;
 };
 
-auto ReadReplyPacketBuilder::getTotalSize(
-    const ReadReplyPacketConfig& config) const noexcept -> size_t {
-  return config.replyAddress.size() + 12 + config.data.size() + 1;
-}
-
 auto ReadReplyPacketBuilder::build(const ReadReplyPacketConfig& config,
                                    std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
-  if (out.size() < getTotalSize(config)) {
+  if (out.size() < config.expectedSize()) [[unlikely]] {
     spw_rmap::debug::debug("ReadReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }

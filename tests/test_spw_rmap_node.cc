@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -22,7 +23,7 @@ class MockBackend {
   MockBackend(std::string ip, std::string port)
       : ip_address_(std::move(ip)), port_(std::move(port)) {}
 
-  auto getIpAddress() const noexcept -> const std::string& {
+  [[nodiscard]] auto getIpAddress() const noexcept -> const std::string& {
     return ip_address_;
   }
 
@@ -30,7 +31,9 @@ class MockBackend {
     ip_address_ = std::move(ip_address);
   }
 
-  auto getPort() const noexcept -> const std::string& { return port_; }
+  [[nodiscard]] auto getPort() const noexcept -> const std::string& {
+    return port_;
+  }
 
   auto setPort(std::string port) noexcept -> void { port_ = std::move(port); }
 
@@ -56,7 +59,8 @@ class MockBackend {
       return 0U;
     }
     std::unique_lock<std::mutex> lock(mtx_);
-    cv_.wait(lock, [&] { return shutdown_ || !incoming_bytes_.empty(); });
+    cv_.wait(lock,
+             [&] -> bool { return shutdown_ || !incoming_bytes_.empty(); });
     if (incoming_bytes_.empty()) {
       return std::unexpected{
           std::make_error_code(std::errc::operation_canceled)};
@@ -158,7 +162,7 @@ auto makeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
   frame[9] = static_cast<uint8_t>((length >> 16) & 0xFF);
   frame[10] = static_cast<uint8_t>((length >> 8) & 0xFF);
   frame[11] = static_cast<uint8_t>(length & 0xFF);
-  std::copy(payload.begin(), payload.end(), frame.begin() + 12);
+  std::ranges::copy(payload, frame.begin() + 12);
   return frame;
 }
 
@@ -175,7 +179,7 @@ auto buildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
       .incrementMode = true,
       .verifyMode = true,
   };
-  std::vector<uint8_t> payload(builder.getTotalSize(config));
+  std::vector<uint8_t> payload(config.expectedSize());
   EXPECT_TRUE(builder.build(config, payload).has_value());
   return makeFrame(payload);
 }
@@ -205,7 +209,7 @@ TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
 
   auto future = node.writeAsync(
       target_node, 0x1000, payload,
-      [&callback_called](const spw_rmap::Packet& packet) {
+      [&callback_called](const spw_rmap::Packet& packet) -> void {
         callback_called = true;
         EXPECT_EQ(packet.type, spw_rmap::PacketType::WriteReply);
       });
@@ -232,9 +236,11 @@ TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
   EXPECT_EQ(timeout_result.error(), std::make_error_code(std::errc::timed_out));
 
   std::atomic<bool> callback_called{false};
-  auto future = node.writeAsync(
-      target_node, 0x2000, payload,
-      [&callback_called](const spw_rmap::Packet&) { callback_called = true; });
+  auto future =
+      node.writeAsync(target_node, 0x2000, payload,
+                      [&callback_called](const spw_rmap::Packet&) -> void {
+                        callback_called = true;
+                      });
 
   node.enqueueIncoming(buildWriteReplyFrame(0x0020));
 
