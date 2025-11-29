@@ -34,22 +34,12 @@ class PacketBuilderBase {
   auto operator=(PacketBuilderBase&&) -> PacketBuilderBase& = delete;
 
   /**
-   * @brief Calculate the total size of the packet based on the configuration.
-   *
-   * @param config The configuration object containing parameters for the
-   *        packet.
-   * @return size_t The total size of the packet.
-   */
-  [[nodiscard]] virtual auto getTotalSize(const ConfigT& config) const noexcept
-      -> size_t = 0;
-
-  /**
    * @brief Build the packet based on the provided configuration.
    *
    * @param config The configuration object containing parameters for the
    *        packet.
    * @param out The output buffer where the packet will be built.
-   *        out.size() must be at least getTotalSize(config).
+   *        out.size() must be at least config.expectedSize().
    *
    * @return std::expected<size_t, std::error_code> An expected
    *         object indicating success or failure. On success, it contains the
@@ -71,6 +61,12 @@ struct ReadPacketConfig {
   uint32_t dataLength{0};
   uint8_t key{0};
   bool incrementMode{true};
+
+  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
+    return targetSpaceWireAddress.size() + 4 +
+           ((replyAddress.size() + 3) / 4 * 4) +  // Reply address
+           12;
+  }
 };
 
 struct WritePacketConfig {
@@ -86,6 +82,11 @@ struct WritePacketConfig {
   bool reply{true};
   bool verifyMode{true};
   std::span<const uint8_t> data;
+
+  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
+    return targetSpaceWireAddress.size() + 4 +
+           ((replyAddress.size() + 3) / 4 * 4) + 12 + data.size() + 1;
+  }
 };
 
 struct ReadReplyPacketConfig {
@@ -96,6 +97,10 @@ struct ReadReplyPacketConfig {
   uint16_t transactionID{0};
   std::span<const uint8_t> data;
   bool incrementMode{true};
+
+  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
+    return replyAddress.size() + 12 + data.size() + 1;
+  }
 };
 
 struct WriteReplyPacketConfig {
@@ -106,6 +111,10 @@ struct WriteReplyPacketConfig {
   uint16_t transactionID{0};
   bool incrementMode{true};
   bool verifyMode{true};
+
+  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
+    return replyAddress.size() + 8;
+  }
 };
 
 /**
@@ -115,8 +124,6 @@ struct WriteReplyPacketConfig {
  */
 class ReadPacketBuilder final : public PacketBuilderBase<ReadPacketConfig> {
  public:
-  [[nodiscard]] auto getTotalSize(const ReadPacketConfig& config) const noexcept
-      -> size_t override;
   using PacketBuilderBase<ReadPacketConfig>::PacketBuilderBase;
   auto build(const ReadPacketConfig& config, std::span<uint8_t> out) noexcept
       -> std::expected<size_t, std::error_code> final;
@@ -129,9 +136,6 @@ class ReadPacketBuilder final : public PacketBuilderBase<ReadPacketConfig> {
  */
 class WritePacketBuilder final : public PacketBuilderBase<WritePacketConfig> {
  public:
-  [[nodiscard]] auto getTotalSize(
-      const WritePacketConfig& config) const noexcept -> size_t override;
-
   using PacketBuilderBase<WritePacketConfig>::PacketBuilderBase;
   auto build(const WritePacketConfig& config, std::span<uint8_t> out) noexcept
       -> std::expected<size_t, std::error_code> final;
@@ -145,9 +149,6 @@ class WritePacketBuilder final : public PacketBuilderBase<WritePacketConfig> {
 class WriteReplyPacketBuilder final
     : public PacketBuilderBase<WriteReplyPacketConfig> {
  public:
-  [[nodiscard]] auto getTotalSize(
-      const WriteReplyPacketConfig& config) const noexcept -> size_t override;
-
   using PacketBuilderBase<WriteReplyPacketConfig>::PacketBuilderBase;
   auto build(const WriteReplyPacketConfig& config,
              std::span<uint8_t> out) noexcept
@@ -162,9 +163,6 @@ class WriteReplyPacketBuilder final
 class ReadReplyPacketBuilder final
     : public PacketBuilderBase<ReadReplyPacketConfig> {
  public:
-  [[nodiscard]] auto getTotalSize(
-      const ReadReplyPacketConfig& config) const noexcept -> size_t override;
-
   using PacketBuilderBase<ReadReplyPacketConfig>::PacketBuilderBase;
   auto build(const ReadReplyPacketConfig& config,
              std::span<uint8_t> out) noexcept

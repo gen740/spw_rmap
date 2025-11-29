@@ -95,7 +95,7 @@ TEST(spw_rmap, ReadPacket) {
     };
 
     std::vector<uint8_t> packet;
-    packet.resize(b.getTotalSize(c));
+    packet.resize(c.expectedSize());
 
     auto res = b.build(c, packet);
     ASSERT_TRUE(res.has_value());
@@ -151,7 +151,7 @@ TEST(spw_rmap, ReadReplyPacket) {
     };
 
     std::vector<uint8_t> packet;
-    packet.resize(b.getTotalSize(c));
+    packet.resize(c.expectedSize());
 
     auto res = b.build(c, packet);
     ASSERT_TRUE(res.has_value());
@@ -208,7 +208,7 @@ TEST(spw_rmap, WritePacket) {
     };
 
     std::vector<uint8_t> packet;
-    packet.resize(b.getTotalSize(c));
+    packet.resize(c.expectedSize());
 
     auto res = b.build(c, packet);
     ASSERT_TRUE(res.has_value());
@@ -258,7 +258,7 @@ TEST(spw_rmap, WriteReplyPacket) {
     };
 
     std::vector<uint8_t> packet;
-    packet.resize(b.getTotalSize(c));
+    packet.resize(c.expectedSize());
 
     auto res = b.build(c, packet);
     ASSERT_TRUE(res.has_value());
@@ -300,7 +300,7 @@ TEST(spw_rmap, ParseReadPacketDirectly) {
       .incrementMode = true,
   };
 
-  std::vector<uint8_t> packet(builder.getTotalSize(config));
+  std::vector<uint8_t> packet(config.expectedSize());
   ASSERT_TRUE(builder.build(config, packet).has_value());
 
   PacketParser parser;
@@ -346,7 +346,7 @@ TEST(spw_rmap, ParseWritePacketDirectly) {
       .data = payload,
   };
 
-  std::vector<uint8_t> packet(builder.getTotalSize(config));
+  std::vector<uint8_t> packet(config.expectedSize());
   ASSERT_TRUE(builder.build(config, packet).has_value());
 
   PacketParser parser;

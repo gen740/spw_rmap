@@ -33,7 +33,7 @@ auto main() -> int try {
                                     .incrementMode = true};
 
   spw_rmap::ReadPacketBuilder builder;
-  std::vector<uint8_t> buffer(builder.getTotalSize(config));
+  std::vector<uint8_t> buffer(config.expectedSize());
   auto res = builder.build(config, buffer);
   if (!res.has_value()) {
     std::cerr << "Failed to build packet: " << res.error().message() << '\n';
