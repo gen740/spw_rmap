@@ -82,10 +82,10 @@ class SpwRmapNodeBase {
       -> std::expected<void, std::error_code> = 0;
 
   /**
-   * @brief Writes data to a target node.
+   * @brief Writes data to a target node asynchronously.
    *
-   * This function sends data to a specific memory address of the target node.
-   * The write operation is performed synchronously.
+   * This function sends data to a specific memory address of the target node
+   * and resolves the returned future when the reply is received.
    *
    * @param logical_address Logical address of the target node.
    * @param memory_address Target memory address.
@@ -98,10 +98,10 @@ class SpwRmapNodeBase {
       -> std::future<std::expected<void, std::error_code>> = 0;
 
   /**
-   * @brief Reads data from a target node.
+   * @brief Reads data from a target node asynchronously.
    *
    * This function retrieves data from a specific memory address of the target
-   * node. The read operation is performed synchronously.
+   * node and resolves the future once the read reply is received.
    *
    * @param logical_address Logical address of the target node.
    * @param memory_address Target memory address.

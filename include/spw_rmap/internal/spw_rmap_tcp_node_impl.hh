@@ -700,16 +700,21 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto runLoop() noexcept -> std::expected<void, std::error_code> override {
     running_.store(true);
-    while (
-        running_.load() &&
-        poll()
-            .or_else(
-                [](std::error_code ec) -> std::expected<void, std::error_code> {
-                  spw_rmap::debug::debug("Error in poll(): ", ec.message());
-                  return std::unexpected{ec};
-                })
-            .has_value()) {
-      ;
+    while (running_.load()) {
+      auto res = poll();
+      if (res.has_value()) {
+        continue;
+      }
+      spw_rmap::debug::debug("Error in poll(): ", res.error().message());
+      auto ensure_res = ensureConnectionReady_();
+      if (ensure_res.has_value()) {
+        continue;
+      }
+      auto reconnect_res = connectLoopUntilHealthy_();
+      if (!reconnect_res.has_value()) {
+        running_.store(false);
+        return std::unexpected{reconnect_res.error()};
+      }
     }
     return {};
   }
@@ -734,10 +739,25 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     transaction_id_database_.setTimeout(timeout);
   }
 
+  /**
+   * @brief Enables or disables auto polling.
+   *
+   * When enabled, the node runs `poll()` internally; synchronous `read`/`write`
+   * must be issued one at a time and the asynchronous APIs (`readAsync`,
+   * `writeAsync`) return `operation_not_permitted`.
+   */
   auto setAutoPollingMode(bool enable) noexcept -> void {
     auto_polling_mode_ = enable;
   }
 
+  /**
+   * @brief Synchronously write data to a target node.
+   *
+   * When auto polling mode is enabled via `setAutoPollingMode(true)` this call
+   * must be serialized; do not issue concurrent synchronous writes because the
+   * internal poll loop can only track one outstanding transaction at a time in
+   * that mode.
+   */
   auto write(std::shared_ptr<TargetNodeBase> target_node,
              uint32_t memory_address, const std::span<const uint8_t> data,
              std::chrono::milliseconds timeout =
@@ -767,8 +787,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           })
           .and_then([this, &transaction_id_memo](
                         Packet packet) -> std::expected<void, std::error_code> {
-            transaction_id_database_.release(
-                static_cast<uint16_t>(transaction_id_memo));
             if (packet.transactionID !=
                 static_cast<uint16_t>(transaction_id_memo)) {
               spw_rmap::debug::debug(
@@ -778,6 +796,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   std::make_error_code(std::errc::bad_message)};
             }
             if (packet.type == PacketType::WriteReply) {
+              transaction_id_database_.release(
+                  static_cast<uint16_t>(transaction_id_memo));
               return {};
             } else {
               return std::unexpected{
@@ -811,6 +831,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return std::unexpected{last_error};
   }
 
+  /**
+   * @brief Asynchronously write data to a target node.
+   *
+   * Auto polling mode disables asynchronous writes—`writeAsync` immediately
+   * returns a future containing `operation_not_permitted` when
+   * `setAutoPollingMode(true)` is active.
+   */
   auto writeAsync(std::shared_ptr<TargetNodeBase> target_node,
                   uint32_t memory_address, const std::span<const uint8_t> data,
                   std::function<void(Packet)> on_complete) noexcept
@@ -827,6 +854,12 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return std::move(async_op.future);
   }
 
+  /**
+   * @brief Synchronously read data from a target node.
+   *
+   * With auto polling enabled only one synchronous read may be in flight—wait
+   * for the call to finish before issuing another synchronous read/write.
+   */
   auto read(std::shared_ptr<TargetNodeBase> target_node,
             uint32_t memory_address, const std::span<uint8_t> data,
             std::chrono::milliseconds timeout =
@@ -856,8 +889,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           })
           .and_then([this, &transaction_id_memo, &data](
                         Packet packet) -> std::expected<void, std::error_code> {
-            transaction_id_database_.release(
-                static_cast<uint16_t>(transaction_id_memo));
             if (packet.transactionID !=
                 static_cast<uint16_t>(transaction_id_memo)) {
               spw_rmap::debug::debug(
@@ -866,24 +897,23 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               return std::unexpected{
                   std::make_error_code(std::errc::bad_message)};
             }
-            if (packet.type == PacketType::ReadReply) {
-              transaction_id_database_.release(
-                  static_cast<uint16_t>(transaction_id_memo));
-              if (packet.dataLength != data.size() ||
-                  packet.data.size() != data.size()) {
-                spw_rmap::debug::debug(
-                    "Received Read Reply packet with unexpected data "
-                    "length: ",
-                    packet.dataLength);
-                return std::unexpected{
-                    std::make_error_code(std::errc::bad_message)};
-              }
-              std::ranges::copy(packet.data, data.begin());
-              return {};
-            } else {
+            if (packet.type != PacketType::ReadReply) {
               return std::unexpected{
                   std::make_error_code(std::errc::bad_message)};
             }
+            if (packet.dataLength != data.size() ||
+                packet.data.size() != data.size()) {
+              spw_rmap::debug::debug(
+                  "Received Read Reply packet with unexpected data "
+                  "length: ",
+                  packet.dataLength);
+              return std::unexpected{
+                  std::make_error_code(std::errc::bad_message)};
+            }
+            std::ranges::copy(packet.data, data.begin());
+            transaction_id_database_.release(
+                static_cast<uint16_t>(transaction_id_memo));
+            return {};
           })
           .or_else([this, &transaction_id_memo](std::error_code ec)
                        -> std::expected<void, std::error_code> {
@@ -914,6 +944,12 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return std::unexpected{last_error};
   }
 
+  /**
+   * @brief Asynchronously read data from a target node.
+   *
+   * When auto polling mode is active this function is unavailable and returns a
+   * future that resolves to `operation_not_permitted`.
+   */
   auto readAsync(std::shared_ptr<TargetNodeBase> target_node,
                  uint32_t memory_address, uint32_t data_length,
                  std::function<void(Packet)> on_complete) noexcept
