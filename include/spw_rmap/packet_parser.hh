@@ -3,7 +3,9 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <span>
+#include <spw_rmap/error_code.hh>
 
 namespace spw_rmap {
 
@@ -15,23 +17,7 @@ enum class PacketType {
   WriteReply = 4,
 };
 
-struct Packet {
-  std::span<const uint8_t> targetSpaceWireAddress{};
-  std::span<const uint8_t> replyAddress{};
-  uint8_t initiatorLogicalAddress{};
-  uint8_t instruction{};
-  uint8_t key{};
-  uint8_t status{};
-  uint8_t targetLogicalAddress{};
-  uint16_t transactionID{};
-  uint8_t extendedAddress{};
-  uint32_t address{};
-  uint32_t dataLength{};
-  std::span<const uint8_t> data{};
-  PacketType type{PacketType::Undefined};
-};
-
-enum class PacketStatusCode {
+enum class PacketStatusCode : uint8_t {
   CommandExecutedSuccessfully = 0,
   GeneralErrorCode = 1,
   UnusedRMAPPacketTypeOrCommandCode = 2,
@@ -46,40 +32,23 @@ enum class PacketStatusCode {
   InvalidTargetLogicalAddress = 12,
 };
 
-class PacketParser {
- private:
-  Packet packet_{};
-
- public:
-  enum class Status {
-    Success = 0,
-    InvalidPacket = 2,
-    HeaderCRCError = 3,
-    DataCRCError = 4,
-    IncompletePacket = 5,
-    NotReplyPacket = 6,
-    PacketStatusError = 7,
-    UnknownProtocolIdentifier = 8,
-  };
-
-  [[nodiscard]] auto parseReadPacket(
-      const std::span<const uint8_t> packet) noexcept -> Status;
-
-  [[nodiscard]] auto parseReadReplyPacket(
-      const std::span<const uint8_t> packet) noexcept -> Status;
-
-  [[nodiscard]] auto parseWritePacket(
-      const std::span<const uint8_t> packet) noexcept -> Status;
-
-  [[nodiscard]] auto parseWriteReplyPacket(
-      const std::span<const uint8_t> packet) noexcept -> Status;
-
-  [[nodiscard]] auto parse(const std::span<const uint8_t> packet) noexcept
-      -> Status;
-
-  [[nodiscard]] auto getPacket() const noexcept -> const Packet& {
-    return packet_;
-  }
+struct Packet {
+  std::span<const uint8_t> targetSpaceWireAddress{};
+  std::span<const uint8_t> replyAddress{};
+  uint8_t initiatorLogicalAddress{};
+  uint8_t instruction{};
+  uint8_t key{};
+  PacketStatusCode status{};
+  uint8_t targetLogicalAddress{};
+  uint16_t transactionID{};
+  uint8_t extendedAddress{};
+  uint32_t address{};
+  uint32_t dataLength{};
+  std::span<const uint8_t> data{};
+  PacketType type{PacketType::Undefined};
 };
+
+auto ParseRMAPPacket(const std::span<const uint8_t> data) noexcept
+    -> std::expected<Packet, std::error_code>;
 
 };  // namespace spw_rmap

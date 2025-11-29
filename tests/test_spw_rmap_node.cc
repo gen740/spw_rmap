@@ -171,8 +171,7 @@ auto buildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
   auto config = spw_rmap::WriteReplyPacketConfig{
       .replyAddress = reply_addr,
       .initiatorLogicalAddress = 0x34,
-      .status = static_cast<uint8_t>(
-          spw_rmap::PacketStatusCode::CommandExecutedSuccessfully),
+      .status = spw_rmap::PacketStatusCode::CommandExecutedSuccessfully,
       .targetLogicalAddress = 0xFE,
       .transactionID = transaction_id,
       .incrementMode = true,
@@ -217,7 +216,6 @@ TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
 
   auto poll_result = node.poll();
   ASSERT_TRUE(poll_result.has_value());
-  EXPECT_TRUE(poll_result.value());
 
   auto write_result = future.get();
   EXPECT_TRUE(write_result.has_value());
@@ -245,7 +243,6 @@ TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
 
   auto poll_result = node.poll();
   ASSERT_TRUE(poll_result.has_value());
-  EXPECT_TRUE(poll_result.value());
 
   auto write_result = future.get();
   EXPECT_TRUE(write_result.has_value());
