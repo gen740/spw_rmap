@@ -3,6 +3,7 @@
 #pragma once
 #include <algorithm>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -10,10 +11,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
-#include <ranges>
 #include <string>
 #include <thread>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -78,8 +77,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   TransactionDatabase transaction_id_database_;
 
   PacketParser packet_parser_ = {};
-  ReadPacketBuilder read_packet_builder_ = {};
-  WritePacketBuilder write_packet_builder_ = {};
   uint8_t initiator_logical_address_ = 0xFE;
   BufferPolicy buffer_policy_ = BufferPolicy::AutoResize;
   std::chrono::microseconds send_timeout_{std::chrono::milliseconds{500}};
@@ -507,7 +504,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         .dataLength = data_length,
     };
 
-    auto res = read_packet_builder_.build(config, send_buffer.subspan(12));
+    auto res = spw_rmap::BuildReadPacket(config, send_buffer.subspan(12));
     if (!res.has_value()) {
       spw_rmap::debug::debug("Failed to build Read Packet: ",
                              res.error().message());
@@ -558,7 +555,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         .data = data,
     };
 
-    auto res = write_packet_builder_.build(config, send_buffer.subspan(12));
+    auto res = spw_rmap::BuildWritePacket(config, send_buffer.subspan(12));
     if (!res.has_value()) {
       spw_rmap::debug::debug("Failed to build Write Packet: ",
                              res.error().message());
@@ -638,7 +635,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             .data = data,
             .incrementMode = true,
         };
-        ReadReplyPacketBuilder builder;
         std::lock_guard<std::mutex> lock(send_mtx_);
         auto send_buffer = std::span(send_buf_);
         if (config.expectedSize() + 12 > send_buffer.size()) {
@@ -651,7 +647,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           send_buf_.resize(config.expectedSize() + 12);
           send_buffer = std::span(send_buf_);
         }
-        auto build_res = builder.build(config, send_buffer.subspan(12));
+        auto build_res =
+            spw_rmap::BuildReadReplyPacket(config, send_buffer.subspan(12));
         if (!build_res.has_value()) {
           spw_rmap::debug::debug("Failed to build Read Reply Packet: ",
                                  build_res.error().message());
@@ -686,7 +683,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             .incrementMode = true,
             .verifyMode = true,
         };
-        WriteReplyPacketBuilder builder;
         std::lock_guard<std::mutex> lock(send_mtx_);
         auto send_buffer = std::span(send_buf_);
         if (config.expectedSize() + 12 > send_buffer.size()) {
@@ -699,7 +695,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           send_buf_.resize(config.expectedSize() + 12);
           send_buffer = std::span(send_buf_);
         }
-        auto build_res = builder.build(config, send_buffer.subspan(12));
+        auto build_res =
+            spw_rmap::BuildWriteReplyPacket(config, send_buffer.subspan(12));
         if (!build_res.has_value()) {
           std::cerr << "Failed to build Write Reply Packet: "
                     << build_res.error().message() << "\n";

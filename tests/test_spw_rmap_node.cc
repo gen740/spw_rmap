@@ -167,7 +167,6 @@ auto makeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
 }
 
 auto buildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
-  spw_rmap::WriteReplyPacketBuilder builder;
   auto reply_addr = std::array<uint8_t, 1>{0x01};
   auto config = spw_rmap::WriteReplyPacketConfig{
       .replyAddress = reply_addr,
@@ -180,7 +179,7 @@ auto buildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
       .verifyMode = true,
   };
   std::vector<uint8_t> payload(config.expectedSize());
-  EXPECT_TRUE(builder.build(config, payload).has_value());
+  EXPECT_TRUE(spw_rmap::BuildWriteReplyPacket(config, payload).has_value());
   return makeFrame(payload);
 }
 
