@@ -11,8 +11,8 @@
 
 namespace spw_rmap {
 
-auto ReadPacketBuilder::build(const ReadPacketConfig& config,
-                              std::span<uint8_t> out) noexcept
+auto BuildReadPacket(const ReadPacketConfig& config,
+                     std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
   if (out.size() < config.expectedSize()) [[unlikely]] {
     spw_rmap::debug::debug("ReadPacketBuilder::build: Buffer too small");
@@ -64,8 +64,8 @@ auto ReadPacketBuilder::build(const ReadPacketConfig& config,
   return head;
 };
 
-auto WritePacketBuilder::build(const WritePacketConfig& config,
-                               std::span<uint8_t> out) noexcept
+auto BuildWritePacket(const WritePacketConfig& config,
+                      std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
   if (out.size() < config.expectedSize()) [[unlikely]] {
     spw_rmap::debug::debug("WritePacketBuilder::build: Buffer too small");
@@ -136,44 +136,8 @@ auto WritePacketBuilder::build(const WritePacketConfig& config,
   return head;
 };
 
-auto WriteReplyPacketBuilder::build(const WriteReplyPacketConfig& config,
-                                    std::span<uint8_t> out) noexcept
-    -> std::expected<size_t, std::error_code> {
-  if (out.size() < config.expectedSize()) [[unlikely]] {
-    spw_rmap::debug::debug("WriteReplyPacketBuilder::build: Buffer too small");
-    return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
-  }
-  auto head = 0;
-  for (const auto& byte : config.replyAddress) {
-    out[head++] = (byte);
-  }
-  out[head++] = (config.initiatorLogicalAddress);
-  out[head++] = (0x01);  // Protocol Identifier
-  {                      // Instruction field
-    uint8_t instruction = 0;
-    instruction |= (std::to_underlying(RMAPPacketType::Reply));
-    instruction |= (std::to_underlying(RMAPCommandCode::Write));
-    instruction |= std::to_underlying(RMAPCommandCode::Reply);
-    if (config.verifyMode) {
-      instruction |= std::to_underlying(RMAPCommandCode::VerifyDataBeforeWrite);
-    }
-    if (config.incrementMode) {
-      instruction |= std::to_underlying(RMAPCommandCode::IncrementAddress);
-    }
-    out[head++] = (instruction);
-  }
-  out[head++] = (config.status);
-  out[head++] = (config.targetLogicalAddress);
-  out[head++] = (static_cast<uint8_t>(config.transactionID >> 8));
-  out[head++] = (static_cast<uint8_t>(config.transactionID & 0xFF));
-  auto crc = crc::calcCRC(std::span(out).subspan(
-      config.replyAddress.size(), head - config.replyAddress.size()));
-  out[head++] = (crc);
-  return head;
-};
-
-auto ReadReplyPacketBuilder::build(const ReadReplyPacketConfig& config,
-                                   std::span<uint8_t> out) noexcept
+auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
+                          std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
   if (out.size() < config.expectedSize()) [[unlikely]] {
     spw_rmap::debug::debug("ReadReplyPacketBuilder::build: Buffer too small");
@@ -213,6 +177,42 @@ auto ReadReplyPacketBuilder::build(const ReadReplyPacketConfig& config,
   }
   auto data_crc = crc::calcCRC(std::span(config.data));
   out[head++] = (data_crc);
+  return head;
+};
+
+auto BuildWriteReplyPacket(const WriteReplyPacketConfig& config,
+                           std::span<uint8_t> out) noexcept
+    -> std::expected<size_t, std::error_code> {
+  if (out.size() < config.expectedSize()) [[unlikely]] {
+    spw_rmap::debug::debug("WriteReplyPacketBuilder::build: Buffer too small");
+    return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
+  }
+  auto head = 0;
+  for (const auto& byte : config.replyAddress) {
+    out[head++] = (byte);
+  }
+  out[head++] = (config.initiatorLogicalAddress);
+  out[head++] = (0x01);  // Protocol Identifier
+  {                      // Instruction field
+    uint8_t instruction = 0;
+    instruction |= (std::to_underlying(RMAPPacketType::Reply));
+    instruction |= (std::to_underlying(RMAPCommandCode::Write));
+    instruction |= std::to_underlying(RMAPCommandCode::Reply);
+    if (config.verifyMode) {
+      instruction |= std::to_underlying(RMAPCommandCode::VerifyDataBeforeWrite);
+    }
+    if (config.incrementMode) {
+      instruction |= std::to_underlying(RMAPCommandCode::IncrementAddress);
+    }
+    out[head++] = (instruction);
+  }
+  out[head++] = (config.status);
+  out[head++] = (config.targetLogicalAddress);
+  out[head++] = (static_cast<uint8_t>(config.transactionID >> 8));
+  out[head++] = (static_cast<uint8_t>(config.transactionID & 0xFF));
+  auto crc = crc::calcCRC(std::span(out).subspan(
+      config.replyAddress.size(), head - config.replyAddress.size()));
+  out[head++] = (crc);
   return head;
 };
 

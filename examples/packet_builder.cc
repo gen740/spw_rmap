@@ -1,7 +1,6 @@
 #include "spw_rmap/packet_builder.hh"
 
 #include <array>
-#include <iomanip>
 #include <iostream>
 #include <vector>
 
@@ -32,9 +31,8 @@ auto main() -> int try {
                                     .key = 0xAB,
                                     .incrementMode = true};
 
-  spw_rmap::ReadPacketBuilder builder;
   std::vector<uint8_t> buffer(config.expectedSize());
-  auto res = builder.build(config, buffer);
+  auto res = spw_rmap::BuildReadPacket(config, buffer);
   if (!res.has_value()) {
     std::cerr << "Failed to build packet: " << res.error().message() << '\n';
     return 1;

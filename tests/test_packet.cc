@@ -79,7 +79,6 @@ TEST(spw_rmap, ReadPacket) {
     TargetNodeDynamic node(random_logical_address(), std::move(target_address),
                            std::move(reply_address));
 
-    auto b = ReadPacketBuilder();
     auto c = ReadPacketConfig{
         .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
         .replyAddress = node.getReplyAddress(),
@@ -97,7 +96,7 @@ TEST(spw_rmap, ReadPacket) {
     std::vector<uint8_t> packet;
     packet.resize(c.expectedSize());
 
-    auto res = b.build(c, packet);
+    auto res = spw_rmap::BuildReadPacket(c, packet);
     ASSERT_TRUE(res.has_value());
     auto parser = PacketParser();
     auto parsed = parser.parse(packet);
@@ -139,7 +138,6 @@ TEST(spw_rmap, ReadReplyPacket) {
       data.push_back(random_byte());
     }
 
-    auto b = ReadReplyPacketBuilder();
     auto c = ReadReplyPacketConfig{
         .replyAddress = node.getReplyAddress(),
         .status = random_byte(),
@@ -153,7 +151,7 @@ TEST(spw_rmap, ReadReplyPacket) {
     std::vector<uint8_t> packet;
     packet.resize(c.expectedSize());
 
-    auto res = b.build(c, packet);
+    auto res = spw_rmap::BuildReadReplyPacket(c, packet);
     ASSERT_TRUE(res.has_value());
     auto parser = PacketParser();
     auto parsed = parser.parse(packet);
@@ -191,7 +189,6 @@ TEST(spw_rmap, WritePacket) {
       data.push_back(random_byte());
     }
 
-    auto b = WritePacketBuilder();
     auto c = WritePacketConfig{
         .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
         .replyAddress = node.getReplyAddress(),
@@ -210,7 +207,7 @@ TEST(spw_rmap, WritePacket) {
     std::vector<uint8_t> packet;
     packet.resize(c.expectedSize());
 
-    auto res = b.build(c, packet);
+    auto res = spw_rmap::BuildWritePacket(c, packet);
     ASSERT_TRUE(res.has_value());
     auto parser = PacketParser();
     auto parsed = parser.parse(packet);
@@ -245,7 +242,6 @@ TEST(spw_rmap, WriteReplyPacket) {
     TargetNodeDynamic node(random_logical_address(), std::move(target_address),
                            std::move(reply_address));
 
-    auto b = WriteReplyPacketBuilder();
     auto c = WriteReplyPacketConfig{
         .replyAddress = node.getReplyAddress(),
         .initiatorLogicalAddress = random_logical_address(),
@@ -260,7 +256,7 @@ TEST(spw_rmap, WriteReplyPacket) {
     std::vector<uint8_t> packet;
     packet.resize(c.expectedSize());
 
-    auto res = b.build(c, packet);
+    auto res = spw_rmap::BuildWriteReplyPacket(c, packet);
     ASSERT_TRUE(res.has_value());
     auto parser = PacketParser();
     auto parsed = parser.parse(packet);
@@ -286,7 +282,6 @@ TEST(spw_rmap, ParseReadPacketDirectly) {
   TargetNodeDynamic node(0x34, std::move(target_address),
                          std::move(reply_address));
 
-  auto builder = ReadPacketBuilder();
   auto config = ReadPacketConfig{
       .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
       .replyAddress = node.getReplyAddress(),
@@ -301,7 +296,7 @@ TEST(spw_rmap, ParseReadPacketDirectly) {
   };
 
   std::vector<uint8_t> packet(config.expectedSize());
-  ASSERT_TRUE(builder.build(config, packet).has_value());
+  ASSERT_TRUE(BuildReadPacket(config, packet).has_value());
 
   PacketParser parser;
   const auto status = parser.parseReadPacket(
@@ -330,7 +325,6 @@ TEST(spw_rmap, ParseWritePacketDirectly) {
 
   std::array<uint8_t, 8> payload{0, 1, 2, 3, 4, 5, 6, 7};
 
-  auto builder = WritePacketBuilder();
   auto config = WritePacketConfig{
       .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
       .replyAddress = node.getReplyAddress(),
@@ -347,7 +341,7 @@ TEST(spw_rmap, ParseWritePacketDirectly) {
   };
 
   std::vector<uint8_t> packet(config.expectedSize());
-  ASSERT_TRUE(builder.build(config, packet).has_value());
+  ASSERT_TRUE(spw_rmap::BuildWritePacket(config, packet).has_value());
 
   PacketParser parser;
   const auto status = parser.parseWritePacket(

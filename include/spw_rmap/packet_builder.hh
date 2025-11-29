@@ -10,46 +10,6 @@
 
 namespace spw_rmap {
 
-/**
- * @class PacketBuilderBase
- * @brief Base class for packet builders.
- *
- * @tparam ConfigT The type of the configuration used to build the packet.
- */
-template <class ConfigT>
-class PacketBuilderBase {
- private:
-  size_t total_size_ = 0;
-
- public:
-  virtual ~PacketBuilderBase() = default;
-  explicit PacketBuilderBase() noexcept = default;
-
-  /**
-   * @brief Delete copy and move constructors and assignment operators.
-   */
-  PacketBuilderBase(const PacketBuilderBase&) = delete;
-  auto operator=(const PacketBuilderBase&) -> PacketBuilderBase& = delete;
-  PacketBuilderBase(PacketBuilderBase&&) = delete;
-  auto operator=(PacketBuilderBase&&) -> PacketBuilderBase& = delete;
-
-  /**
-   * @brief Build the packet based on the provided configuration.
-   *
-   * @param config The configuration object containing parameters for the
-   *        packet.
-   * @param out The output buffer where the packet will be built.
-   *        out.size() must be at least config.expectedSize().
-   *
-   * @return std::expected<size_t, std::error_code> An expected
-   *         object indicating success or failure. On success, it contains the
-   *         size of the built packet. On failure, it contains an error code.
-   */
-  [[nodiscard]]
-  virtual auto build(const ConfigT& config, std::span<uint8_t> out)
-      -> std::expected<size_t, std::error_code> = 0;
-};
-
 struct ReadPacketConfig {
   std::span<const uint8_t> targetSpaceWireAddress;
   std::span<const uint8_t> replyAddress;
@@ -117,56 +77,20 @@ struct WriteReplyPacketConfig {
   }
 };
 
-/**
- * @class ReadPacketBuilder
- *
- * @brief A class for building RMAP read packets.
- */
-class ReadPacketBuilder final : public PacketBuilderBase<ReadPacketConfig> {
- public:
-  using PacketBuilderBase<ReadPacketConfig>::PacketBuilderBase;
-  auto build(const ReadPacketConfig& config, std::span<uint8_t> out) noexcept
-      -> std::expected<size_t, std::error_code> final;
-};
+auto BuildReadPacket(const ReadPacketConfig& config,
+                     std::span<uint8_t> out) noexcept
+    -> std::expected<size_t, std::error_code>;
 
-/**
- * @class WritePacketBuilder
- *
- * @brief A class for building RMAP write packets.
- */
-class WritePacketBuilder final : public PacketBuilderBase<WritePacketConfig> {
- public:
-  using PacketBuilderBase<WritePacketConfig>::PacketBuilderBase;
-  auto build(const WritePacketConfig& config, std::span<uint8_t> out) noexcept
-      -> std::expected<size_t, std::error_code> final;
-};
+auto BuildWritePacket(const WritePacketConfig& config,
+                      std::span<uint8_t> out) noexcept
+    -> std::expected<size_t, std::error_code>;
 
-/**
- * @class ReadReplyPacketBuilder
- *
- * @brief A class for building RMAP read reply packets.
- */
-class WriteReplyPacketBuilder final
-    : public PacketBuilderBase<WriteReplyPacketConfig> {
- public:
-  using PacketBuilderBase<WriteReplyPacketConfig>::PacketBuilderBase;
-  auto build(const WriteReplyPacketConfig& config,
-             std::span<uint8_t> out) noexcept
-      -> std::expected<size_t, std::error_code> final;
-};
+auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
+                          std::span<uint8_t> out) noexcept
+    -> std::expected<size_t, std::error_code>;
 
-/**
- * @class ReadReplyPacketBuilder
- *
- * @brief A class for building RMAP read reply packets.
- */
-class ReadReplyPacketBuilder final
-    : public PacketBuilderBase<ReadReplyPacketConfig> {
- public:
-  using PacketBuilderBase<ReadReplyPacketConfig>::PacketBuilderBase;
-  auto build(const ReadReplyPacketConfig& config,
-             std::span<uint8_t> out) noexcept
-      -> std::expected<size_t, std::error_code> final;
-};
+auto BuildWriteReplyPacket(const WriteReplyPacketConfig& config,
+                           std::span<uint8_t> out) noexcept
+    -> std::expected<size_t, std::error_code>;
 
 };  // namespace spw_rmap
