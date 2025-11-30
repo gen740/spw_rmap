@@ -818,8 +818,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                effective_timeout]() -> std::expected<void, std::error_code> {
                 return tcp_backend_->setReceiveTimeout(effective_timeout);
               })
-          .and_then([this, &target_node, &memory_address,
-                     &data]() -> std::expected<uint16_t, std::error_code> {
+          .and_then([this]() -> std::expected<uint16_t, std::error_code> {
             return acquireTransaction();
           })
           .and_then([this, &target_node, &memory_address, &data,

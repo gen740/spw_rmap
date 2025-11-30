@@ -61,8 +61,13 @@ class TransactionDatabase {
         if (next_id_ >= id_max_) {
           next_id_ = id_min_;
         }
-        const bool timed_out =
-            timeout_.count() > 0 && now - entry.last_used > timeout_;
+        const bool has_callbacks =
+            entry.reply_callback != nullptr || entry.error_callback != nullptr;
+        bool timed_out = false;
+        if (has_callbacks) {
+          timed_out =
+              timeout_.count() > 0 && (now - entry.last_used > timeout_);
+        }
         if (entry.available || timed_out) {
           if (!entry.available && timed_out) {
             spw_rmap::debug::debug(
