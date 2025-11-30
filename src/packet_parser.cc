@@ -11,22 +11,22 @@ auto parseReadPacket_(Packet& packet,
                       const std::span<const uint8_t> data) noexcept
     -> std::expected<Packet, std::error_code> {
   if (data.size() < 4) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   size_t head = 0;
   const auto instruction = data[2];
   const size_t replyAddressSize =
       static_cast<size_t>(instruction & 0b00000011) * 4;
   if (data.size() != 16 + replyAddressSize) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   if (crc::calcCRC(data.subspan(0, 16 + replyAddressSize)) != 0x00) {
-    return std::unexpected(make_error_code(ParseStatus::HeaderCRCError));
+    return std::unexpected(make_error_code(RMAPParseStatus::HeaderCRCError));
   }
   packet.targetLogicalAddress = data[head++];
   if (data[head++] != 0x01) {
     return std::unexpected(
-        make_error_code(ParseStatus::UnknownProtocolIdentifier));
+        make_error_code(RMAPParseStatus::UnknownProtocolIdentifier));
   }
   packet.instruction = data[head++];
   packet.key = data[head++];
@@ -67,15 +67,15 @@ auto parseReadReplyPacket_(Packet& packet,
     -> std::expected<Packet, std::error_code> {
   size_t head = 0;
   if (data.size() < 12) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   if (crc::calcCRC(data.subspan(0, 12)) != 0x00) {
-    return std::unexpected(make_error_code(ParseStatus::HeaderCRCError));
+    return std::unexpected(make_error_code(RMAPParseStatus::HeaderCRCError));
   }
   packet.initiatorLogicalAddress = data[head++];
   if (data[head++] != 0x01) {
     return std::unexpected(
-        make_error_code(ParseStatus::UnknownProtocolIdentifier));
+        make_error_code(RMAPParseStatus::UnknownProtocolIdentifier));
   }
   packet.instruction = data[head++];
   packet.status = static_cast<PacketStatusCode>(data[head++]);
@@ -89,10 +89,10 @@ auto parseReadReplyPacket_(Packet& packet,
   packet.dataLength |= (data[head++] << 8);
   packet.dataLength |= (data[head++] << 0);
   if (data.size() != 12 + packet.dataLength + 1) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   if (crc::calcCRC(data.subspan(12, packet.dataLength + 1)) != 0x00) {
-    return std::unexpected(make_error_code(ParseStatus::DataCRCError));
+    return std::unexpected(make_error_code(RMAPParseStatus::DataCRCError));
   }
   head++;
   packet.data = std::span<const uint8_t>(data).subspan(head, packet.dataLength);
@@ -103,22 +103,22 @@ auto parseWritePacket_(Packet& packet,
                        const std::span<const uint8_t> data) noexcept
     -> std::expected<Packet, std::error_code> {
   if (data.size() < 4) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   size_t head = 0;
   const auto instruction = data[2];
   const size_t replyAddressSize =
       static_cast<size_t>(instruction & 0b00000011) * 4;
   if (data.size() <= 16 + replyAddressSize) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   if (crc::calcCRC(data.subspan(0, 16 + replyAddressSize)) != 0x00) {
-    return std::unexpected(make_error_code(ParseStatus::HeaderCRCError));
+    return std::unexpected(make_error_code(RMAPParseStatus::HeaderCRCError));
   }
   packet.targetLogicalAddress = data[head++];
   if (data[head++] != 0x01) {
     return std::unexpected(
-        make_error_code(ParseStatus::UnknownProtocolIdentifier));
+        make_error_code(RMAPParseStatus::UnknownProtocolIdentifier));
   }
   packet.instruction = data[head++];
   packet.key = data[head++];
@@ -150,11 +150,11 @@ auto parseWritePacket_(Packet& packet,
   packet.dataLength |= (data[head++] << 8);
   packet.dataLength |= (data[head++] << 0);
   if (data.size() != 16 + replyAddressSize + packet.dataLength + 1) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   if (crc::calcCRC(
           data.subspan(16 + replyAddressSize, packet.dataLength + 1)) != 0x00) {
-    return std::unexpected(make_error_code(ParseStatus::DataCRCError));
+    return std::unexpected(make_error_code(RMAPParseStatus::DataCRCError));
   }
   head++;  // Skip CRC byte
   packet.data = std::span<const uint8_t>(data).subspan(head, packet.dataLength);
@@ -166,15 +166,15 @@ auto parseWriteReplyPacket_(Packet& packet,
     -> std::expected<Packet, std::error_code> {
   size_t head = 0;
   if (data.size() != 8) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   if (crc::calcCRC(data.subspan(0, 8)) != 0x00) {
-    return std::unexpected(make_error_code(ParseStatus::HeaderCRCError));
+    return std::unexpected(make_error_code(RMAPParseStatus::HeaderCRCError));
   }
   packet.initiatorLogicalAddress = data[head++];
   if (data[head++] != 0x01) {
     return std::unexpected(
-        make_error_code(ParseStatus::UnknownProtocolIdentifier));
+        make_error_code(RMAPParseStatus::UnknownProtocolIdentifier));
   }
   packet.instruction = data[head++];
   packet.status = static_cast<PacketStatusCode>(data[head++]);
@@ -193,12 +193,12 @@ auto ParseRMAPPacket(const std::span<const uint8_t> data) noexcept
   while (data[head] < 0x20) {
     head++;
     if (head >= data.size()) [[unlikely]] {
-      return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+      return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
     }
   }
   // Check size
   if (data.size() - head < 4) {
-    return std::unexpected(make_error_code(ParseStatus::IncompletePacket));
+    return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
   }
   packet.instruction = data[head + 2];
   bool is_command = (packet.instruction & 0b01000000) != 0;

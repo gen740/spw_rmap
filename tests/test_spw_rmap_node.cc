@@ -205,11 +205,13 @@ TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
   std::array<uint8_t, 4> payload{0xAA, 0xBB, 0xCC, 0xDD};
   std::atomic<bool> callback_called{false};
 
-  auto future = node.writeAsync(
+  auto write_res = node.writeAsync(
       target_node, 0x1000, payload,
-      [&callback_called](const spw_rmap::Packet& packet) -> void {
+      [&callback_called](
+          std::expected<spw_rmap::Packet, std::error_code> packet) -> void {
         callback_called = true;
-        EXPECT_EQ(packet.type, spw_rmap::PacketType::WriteReply);
+        EXPECT_TRUE(packet.has_value());
+        EXPECT_EQ(packet.value().type, spw_rmap::PacketType::WriteReply);
       });
 
   node.enqueueIncoming(buildWriteReplyFrame(0x0020));
@@ -217,8 +219,7 @@ TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
   auto poll_result = node.poll();
   ASSERT_TRUE(poll_result.has_value());
 
-  auto write_result = future.get();
-  EXPECT_TRUE(write_result.has_value());
+  EXPECT_TRUE(write_res.has_value());
   EXPECT_TRUE(callback_called.load());
 }
 
@@ -233,19 +234,17 @@ TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
   EXPECT_EQ(timeout_result.error(), std::make_error_code(std::errc::timed_out));
 
   std::atomic<bool> callback_called{false};
-  auto future =
-      node.writeAsync(target_node, 0x2000, payload,
-                      [&callback_called](const spw_rmap::Packet&) -> void {
-                        callback_called = true;
-                      });
+  auto write_res = node.writeAsync(
+      target_node, 0x2000, payload,
+      [&callback_called](std::expected<spw_rmap::Packet, std::error_code>)
+          -> void { callback_called = true; });
 
   node.enqueueIncoming(buildWriteReplyFrame(0x0020));
 
   auto poll_result = node.poll();
   ASSERT_TRUE(poll_result.has_value());
 
-  auto write_result = future.get();
-  EXPECT_TRUE(write_result.has_value());
+  EXPECT_TRUE(write_res.has_value());
   EXPECT_TRUE(callback_called.load());
 }
 
