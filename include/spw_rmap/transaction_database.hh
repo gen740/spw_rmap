@@ -13,7 +13,7 @@
 #include "spw_rmap/internal/debug.hh"
 #include "spw_rmap/packet_parser.hh"
 
-namespace spw_rmap::internal {
+namespace spw_rmap {
 
 class TransactionDatabase {
  public:
@@ -53,7 +53,7 @@ class TransactionDatabase {
       -> std::expected<uint16_t, std::error_code> {
     for (size_t i = 0; i < entries_.size(); ++i) {
       std::function<void(std::error_code)> error_callback = nullptr;
-      auto now = std::chrono::steady_clock::now();
+      const auto now = std::chrono::steady_clock::now();
       {
         std::unique_lock<std::mutex> lock(mutex_);
         auto& entry = entries_[next_id_ - id_min_];
@@ -62,8 +62,7 @@ class TransactionDatabase {
           next_id_ = id_min_;
         }
         const bool timed_out =
-            timeout_.count() > 0 &&
-            now - entry.last_used > timeout_;  // zero disables reclamation
+            timeout_.count() > 0 && now - entry.last_used > timeout_;
         if (entry.available || timed_out) {
           if (!entry.available && timed_out) {
             spw_rmap::debug::debug(
@@ -165,4 +164,4 @@ class TransactionDatabase {
   std::mutex mutex_;
 };
 
-}  // namespace spw_rmap::internal
+}  // namespace spw_rmap

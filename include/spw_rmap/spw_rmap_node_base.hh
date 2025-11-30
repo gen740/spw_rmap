@@ -7,26 +7,56 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
-#include <future>
 #include <memory>
 #include <span>
 #include <system_error>
+#include <utility>
 
 #include "spw_rmap/packet_parser.hh"
 #include "spw_rmap/target_node.hh"
+#include "spw_rmap/transaction_database.hh"
 
 namespace spw_rmap {
 
 class SpwRmapNodeBase {
   bool verify_mode_{true};
+  TransactionDatabase transaction_id_database_;
+  std::chrono::milliseconds transaction_id_timeout_{std::chrono::seconds(1)};
 
  protected:
+  explicit SpwRmapNodeBase(uint16_t transaction_id_min,
+                           uint16_t transaction_id_max) noexcept
+      : transaction_id_database_(transaction_id_min, transaction_id_max) {}
+
+  SpwRmapNodeBase() : SpwRmapNodeBase(0x0000, 0x00FF) {}
+
   [[nodiscard]] auto isVerifyMode() const noexcept -> bool {
     return verify_mode_;
   }
 
+  auto acquireTransaction(
+      TransactionDatabase::CallbackPair callbacks = {}) noexcept
+      -> std::expected<uint16_t, std::error_code> {
+    return transaction_id_database_.acquire(std::move(callbacks));
+  }
+
+  [[nodiscard]] auto clampTransactionTimeout(
+      std::chrono::milliseconds requested) const noexcept
+      -> std::chrono::milliseconds {
+    if (transaction_id_timeout_.count() == 0) {
+      return requested;
+    }
+    if (requested.count() == 0 || requested > transaction_id_timeout_) {
+      return transaction_id_timeout_;
+    }
+    return requested;
+  }
+
+  [[nodiscard]] auto getTransactionDatabase() noexcept -> TransactionDatabase& {
+    return transaction_id_database_;
+  }
+
  public:
-  SpwRmapNodeBase() = default;
   virtual ~SpwRmapNodeBase() = default;
 
   SpwRmapNodeBase(const SpwRmapNodeBase&) = delete;
@@ -134,7 +164,14 @@ class SpwRmapNodeBase {
    * reclamation and clamping entirely.
    */
   virtual auto setTransactionTimeout(std::chrono::milliseconds timeout) noexcept
-      -> void = 0;
+      -> void {
+    transaction_id_timeout_ = timeout;
+    transaction_id_database_.setTimeout(timeout);
+  }
+
+  auto cancelTransaction(uint16_t transaction_id) noexcept -> void {
+    transaction_id_database_.release(transaction_id);
+  }
 
   auto setVerifyMode(bool verify_mode) noexcept -> void {
     verify_mode_ = verify_mode;
