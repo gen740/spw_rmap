@@ -6,7 +6,7 @@
 
 namespace spw_rmap {
 
-enum class ParseStatus {
+enum class RMAPParseStatus {
   Success = 0,
   InvalidPacket = 2,
   HeaderCRCError = 3,
@@ -17,29 +17,29 @@ enum class ParseStatus {
   UnknownProtocolIdentifier = 8,
 };
 
-class StatusCodeCategory final : public std::error_category {
+class RMAPStatusCodeCategory final : public std::error_category {
  public:
   [[nodiscard]] auto name() const noexcept -> const char* override {
     return "RMAPStatusCode";
   }
 
   [[nodiscard]] auto message(int ev) const -> std::string override {
-    switch (static_cast<ParseStatus>(ev)) {
-      case ParseStatus::Success:
+    switch (static_cast<RMAPParseStatus>(ev)) {
+      case RMAPParseStatus::Success:
         return "Success";
-      case ParseStatus::InvalidPacket:
+      case RMAPParseStatus::InvalidPacket:
         return "Invalid packet";
-      case ParseStatus::HeaderCRCError:
+      case RMAPParseStatus::HeaderCRCError:
         return "Header CRC error";
-      case ParseStatus::DataCRCError:
+      case RMAPParseStatus::DataCRCError:
         return "Data CRC error";
-      case ParseStatus::IncompletePacket:
+      case RMAPParseStatus::IncompletePacket:
         return "Incomplete packet";
-      case ParseStatus::NotReplyPacket:
+      case RMAPParseStatus::NotReplyPacket:
         return "Not a reply packet";
-      case ParseStatus::PacketStatusError:
+      case RMAPParseStatus::PacketStatusError:
         return "Packet status error";
-      case ParseStatus::UnknownProtocolIdentifier:
+      case RMAPParseStatus::UnknownProtocolIdentifier:
         return "Unknown protocol identifier";
       default:
         return "Unknown status code";
@@ -49,7 +49,7 @@ class StatusCodeCategory final : public std::error_category {
 
 auto status_code_category() noexcept -> const std::error_category&;
 
-inline auto make_error_code(ParseStatus e) noexcept -> std::error_code {
+inline auto make_error_code(RMAPParseStatus e) noexcept -> std::error_code {
   return {static_cast<int>(e), status_code_category()};
 }
 
@@ -58,6 +58,6 @@ inline auto make_error_code(ParseStatus e) noexcept -> std::error_code {
 namespace std {
 
 template <>
-struct is_error_code_enum<spw_rmap::ParseStatus> : true_type {};
+struct is_error_code_enum<spw_rmap::RMAPParseStatus> : true_type {};
 
 }  // namespace std

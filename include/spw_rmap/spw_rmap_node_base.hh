@@ -91,11 +91,11 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Data to write.
    */
-  virtual auto writeAsync(std::shared_ptr<TargetNodeBase> target_node,
-                          uint32_t memory_address,
-                          const std::span<const uint8_t> data,
-                          std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<void, std::error_code>> = 0;
+  virtual auto writeAsync(
+      std::shared_ptr<TargetNodeBase> target_node, uint32_t memory_address,
+      const std::span<const uint8_t> data,
+      std::function<void(std::expected<Packet, std::error_code>)>
+          on_complete) noexcept -> std::expected<uint16_t, std::error_code> = 0;
 
   /**
    * @brief Reads data from a target node asynchronously.
@@ -107,10 +107,11 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Reference to a span where the read data will be stored.
    */
-  virtual auto readAsync(std::shared_ptr<TargetNodeBase> target_node,
-                         uint32_t memory_address, uint32_t data_length,
-                         std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<void, std::error_code>> = 0;
+  virtual auto readAsync(
+      std::shared_ptr<TargetNodeBase> target_node, uint32_t memory_address,
+      uint32_t data_length,
+      std::function<void(std::expected<Packet, std::error_code>)>
+          on_complete) noexcept -> std::expected<uint16_t, std::error_code> = 0;
 
   /**
    * @brief Emits a time code.

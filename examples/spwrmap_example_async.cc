@@ -54,24 +54,33 @@ auto main() -> int try {
   }
 
   if (ok) {
-    auto write_future = client.writeAsync(
-        target, demo_address, payload, [](const spw_rmap::Packet&) -> void {
-          std::cout << "Async write completed\n";
+    auto write_async_res = client.writeAsync(
+        target, demo_address, payload,
+        [](const std::expected<spw_rmap::Packet, std::error_code> packet)
+            -> void {
+          if (packet.has_value()) {
+            std::cout << "Async write completed\n";
+          } else {
+            std::cerr << "Async write error: " << packet.error().message()
+                      << '\n';
+          }
         });
-    if (!write_future.get().has_value()) {
+    if (!write_async_res.has_value()) {
       std::cerr << "Async write failed\n";
       ok = false;
     }
   }
 
   if (ok) {
-    auto read_future = client.readAsync(target, demo_address, payload.size(),
-                                        [](spw_rmap::Packet packet) -> void {
-                                          std::cout << "Async read returned "
-                                                    << packet.data.size()
-                                                    << " bytes\n";
-                                        });
-    if (!read_future.get().has_value()) {
+    auto read_res = client.readAsync(
+        target, demo_address, payload.size(),
+        [](std::expected<spw_rmap::Packet, std::error_code> packet) -> void {
+          if (packet.has_value()) {
+            std::cout << "Async read returned " << packet->data.size()
+                      << " bytes\n";
+          }
+        });
+    if (!read_res.has_value()) {
       std::cerr << "Async read failed\n";
     }
   }

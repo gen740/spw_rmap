@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <concepts>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -212,108 +213,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   };
 
   using PromiseType = std::promise<std::expected<void, std::error_code>>;
-
-  auto startWriteAsyncOperation_(
-      std::shared_ptr<TargetNodeBase> target_node, uint32_t memory_address,
-      const std::span<const uint8_t> data,
-      std::function<void(Packet)> on_complete) noexcept -> AsyncOperation {
-    AsyncOperation op{};
-    auto promise = std::make_shared<PromiseType>();
-    op.future = promise->get_future();
-
-    auto transaction_callbacks = TransactionDatabase::CallbackPair{
-        .reply = [this, on_complete = std::move(on_complete),
-                  promise](const Packet& packet) mutable noexcept -> void {
-          try {
-            on_complete(packet);
-          } catch (const std::exception& e) {
-            spw_rmap::debug::debug("Exception in writeAsync callback: ",
-                                   e.what());
-            promise->set_value(std::unexpected{
-                std::make_error_code(std::errc::operation_canceled)});
-            return;
-          } catch (...) {
-            spw_rmap::debug::debug("Unknown exception in writeAsync callback");
-            promise->set_value(std::unexpected{
-                std::make_error_code(std::errc::operation_canceled)});
-            return;
-          }
-          promise->set_value({});
-        },
-        .error = [promise](std::error_code ec) mutable noexcept -> void {
-          promise->set_value(std::unexpected{ec});
-        },
-    };
-    auto transaction_id_res =
-        transaction_id_database_.acquire(std::move(transaction_callbacks));
-    if (!transaction_id_res.has_value()) {
-      spw_rmap::debug::debug(
-          "Failed to get available Transaction ID for writeAsync");
-      promise->set_value(std::unexpected{transaction_id_res.error()});
-      return op;
-    }
-    op.transaction_id = transaction_id_res.value();
-    const auto transaction_id = *op.transaction_id;
-
-    auto res = sendWritePacket_(std::move(target_node), transaction_id,
-                                memory_address, data);
-    if (!res.has_value()) {
-      promise->set_value(std::unexpected{res.error()});
-      transaction_id_database_.release(transaction_id);
-      op.transaction_id.reset();
-    }
-    return op;
-  }
-
-  auto startReadAsyncOperation_(
-      std::shared_ptr<TargetNodeBase> target_node, uint32_t memory_address,
-      uint32_t data_length, std::function<void(Packet)> on_complete) noexcept
-      -> AsyncOperation {
-    AsyncOperation op{};
-    auto promise = std::make_shared<PromiseType>();
-    op.future = promise->get_future();
-
-    auto read_callbacks = TransactionDatabase::CallbackPair{
-        .reply = [this, on_complete = std::move(on_complete),
-                  promise](const Packet& packet) mutable noexcept -> void {
-          try {
-            on_complete(packet);
-          } catch (const std::exception& e) {
-            spw_rmap::debug::debug("Exception in readAsync callback: ",
-                                   e.what());
-            promise->set_value(std::unexpected{
-                std::make_error_code(std::errc::operation_canceled)});
-            return;
-          } catch (...) {
-            spw_rmap::debug::debug("Unknown exception in readAsync callback");
-            promise->set_value(std::unexpected{
-                std::make_error_code(std::errc::operation_canceled)});
-            return;
-          }
-          promise->set_value({});
-        },
-        .error = [promise](std::error_code ec) mutable noexcept -> void {
-          promise->set_value(std::unexpected{ec});
-        },
-    };
-    auto transaction_id_res =
-        transaction_id_database_.acquire(std::move(read_callbacks));
-    if (!transaction_id_res.has_value()) {
-      promise->set_value(std::unexpected{transaction_id_res.error()});
-      return op;
-    }
-    op.transaction_id = transaction_id_res.value();
-    const auto transaction_id = *op.transaction_id;
-
-    auto res = sendReadPacket_(std::move(target_node), transaction_id,
-                               memory_address, data_length);
-    if (!res.has_value()) {
-      promise->set_value(std::unexpected{res.error()});
-      transaction_id_database_.release(transaction_id);
-      op.transaction_id.reset();
-    }
-    return op;
-  }
 
   auto recvAndParseOnePacket_() noexcept
       -> std::expected<Packet, std::error_code> {
@@ -759,7 +658,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
              std::chrono::milliseconds timeout =
                  std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
-    std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
       return ensureConnectionReady_()
@@ -789,7 +687,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   "Received packet with unexpected Transaction ID: ",
                   packet.transactionID);
               return std::unexpected{
-                  make_error_code(ParseStatus::NotReplyPacket)};
+                  make_error_code(RMAPParseStatus::NotReplyPacket)};
             }
             if (packet.type == PacketType::WriteReply) {
               transaction_id_database_.release(
@@ -809,22 +707,37 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             return std::unexpected{ec};
           });
     } else {
-      auto async_op =
-          startWriteAsyncOperation_(target_node, memory_address, data,
-                                    [](const Packet&) noexcept -> void {});
-      if (async_op.future.wait_for(timeout) == std::future_status::ready) {
-        auto res = async_op.future.get();
-        if (!res.has_value()) {
-          return std::unexpected{res.error()};
-        }
-        return {};
-      }
-      if (async_op.transaction_id.has_value()) {
-        transaction_id_database_.release(*async_op.transaction_id);
-      }
-      last_error = std::make_error_code(std::errc::timed_out);
+      auto write_res = std::expected<void, std::error_code>{};
+      std::mutex write_mtx;
+      std::condition_variable write_cv;
+      bool write_completed = false;
+      return writeAsync(target_node, memory_address, data,
+                        [&write_res, &write_completed, &write_mtx, &write_cv](
+                            std::expected<Packet, std::error_code> res) noexcept
+                            -> void {
+                          {
+                            std::unique_lock<std::mutex> lock(write_mtx);
+                            write_res = res.transform(
+                                [&write_mtx, &write_completed,
+                                 &write_cv](const Packet&) noexcept -> void {});
+                            write_completed = true;
+                          }
+                          write_cv.notify_one();
+                        })
+          .and_then([this, &write_res, &write_completed, &write_mtx, &write_cv,
+                     &timeout](uint16_t transaction_id) noexcept
+                        -> std::expected<void, std::error_code> {
+            std::unique_lock<std::mutex> lock(write_mtx);
+            if (write_cv.wait_for(lock, timeout,
+                                  [&write_completed, this] -> auto {
+                                    return write_completed;
+                                  })) {
+              transaction_id_database_.release(transaction_id);
+              return write_res;
+            }
+            return std::unexpected{std::make_error_code(std::errc::timed_out)};
+          });
     }
-    return std::unexpected{last_error};
   }
 
   /**
@@ -836,18 +749,59 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
    */
   auto writeAsync(std::shared_ptr<TargetNodeBase> target_node,
                   uint32_t memory_address, const std::span<const uint8_t> data,
-                  std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<void, std::error_code>> override {
+                  std::function<void(std::expected<Packet, std::error_code>)>
+                      on_complete) noexcept
+      -> std::expected<uint16_t, std::error_code> override {
     if (auto_polling_mode_) {
-      std::promise<std::expected<void, std::error_code>> prom;
-      auto fut = prom.get_future();
-      prom.set_value(std::unexpected{
-          std::make_error_code(std::errc::operation_not_permitted)});
-      return fut;
+      return std::unexpected{
+          std::make_error_code(std::errc::operation_not_permitted)};
     }
-    auto async_op = startWriteAsyncOperation_(
-        std::move(target_node), memory_address, data, std::move(on_complete));
-    return std::move(async_op.future);
+    return transaction_id_database_
+        .acquire({
+            .reply = [this, on_complete](
+                         const Packet& packet) mutable noexcept -> void {
+              try {
+                on_complete(packet);
+              } catch (const std::exception& e) {
+                spw_rmap::debug::debug("Exception in writeAsync callback: ",
+                                       e.what());
+                return;
+              } catch (...) {
+                spw_rmap::debug::debug(
+                    "Unknown exception in writeAsync callback");
+                return;
+              }
+            },
+            .error =
+                [on_complete](std::error_code ec) mutable noexcept -> void {
+              try {
+                on_complete(std::unexpected{ec});
+              } catch (const std::exception& e) {
+                spw_rmap::debug::debug(
+                    "Exception in writeAsync error callback: ", e.what());
+                return;
+              } catch (...) {
+                spw_rmap::debug::debug(
+                    "Unknown exception in writeAsync error callback");
+                return;
+              }
+            },
+        })
+        .and_then([this, target_node = std::move(target_node), memory_address,
+                   data](uint16_t transaction_id) noexcept
+                      -> std::expected<uint16_t, std::error_code> {
+          return sendWritePacket_(std::move(target_node), transaction_id,
+                                  memory_address, data)
+              .transform_error(
+                  [this, transaction_id](
+                      std::error_code ec) noexcept -> std::error_code {
+                    transaction_id_database_.release(transaction_id);
+                    return ec;
+                  })
+              .transform([transaction_id]() noexcept -> uint16_t {
+                return transaction_id;
+              });
+        });
   }
 
   /**
@@ -861,7 +815,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             std::chrono::milliseconds timeout =
                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
-    std::error_code last_error = std::make_error_code(std::errc::timed_out);
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
       return ensureConnectionReady_()
@@ -877,7 +830,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                         -> std::expected<void, std::error_code> {
             transaction_id_memo = transaction_id;
             return sendReadPacket_(target_node, transaction_id, memory_address,
-                                   data.size());
+                                   data.size())
+                .transform_error(
+                    [this, transaction_id](
+                        std::error_code ec) noexcept -> std::error_code {
+                      transaction_id_database_.release(transaction_id);
+                      return ec;
+                    });
           })
           .and_then([this, &target_node, &memory_address,
                      &data]() -> std::expected<Packet, std::error_code> {
@@ -920,24 +879,47 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             return std::unexpected{ec};
           });
     } else {
-      auto async_op = startReadAsyncOperation_(
-          std::move(target_node), memory_address, data.size(),
-          [data](const Packet& packet) noexcept -> void {
-            std::copy_n(packet.data.data(), data.size(), data.data());
+      auto read_res = std::expected<void, std::error_code>{};
+      std::mutex read_mtx;
+      std::condition_variable read_cv;
+      bool read_completed = false;
+      return readAsync(target_node, memory_address,
+                       static_cast<uint32_t>(data.size()),
+                       [&data, &read_res, &read_completed, &read_mtx, &read_cv](
+                           std::expected<Packet, std::error_code> res) noexcept
+                           -> void {
+                         {
+                           std::unique_lock<std::mutex> lock(read_mtx);
+                           read_res = res.and_then(
+                               [&data](const Packet& packet) noexcept
+                                   -> std::expected<void, std::error_code> {
+                                 if (packet.data.size() != data.size()) {
+                                   return std::unexpected(std::make_error_code(
+                                       std::errc::bad_message));
+
+                                 } else {
+                                   std::ranges::copy(packet.data, data.begin());
+                                 }
+                                 return {};
+                               });
+                           read_completed = true;
+                         }
+                         read_cv.notify_one();
+                       })
+          .and_then([this, &read_res, &read_completed, &read_mtx, &read_cv,
+                     &timeout](uint16_t transaction_id) noexcept
+                        -> std::expected<void, std::error_code> {
+            std::unique_lock<std::mutex> lock(read_mtx);
+            if (read_cv.wait_for(lock, timeout,
+                                 [&read_completed, this] -> auto {
+                                   return read_completed;
+                                 })) {
+              transaction_id_database_.release(transaction_id);
+              return read_res;
+            }
+            return std::unexpected{std::make_error_code(std::errc::timed_out)};
           });
-      if (async_op.future.wait_for(timeout) == std::future_status::ready) {
-        auto res = async_op.future.get();
-        if (!res.has_value()) {
-          return std::unexpected{res.error()};
-        }
-        return {};
-      }
-      if (async_op.transaction_id.has_value()) {
-        transaction_id_database_.release(*async_op.transaction_id);
-      }
-      last_error = std::make_error_code(std::errc::timed_out);
     }
-    return std::unexpected{last_error};
   }
 
   /**
@@ -948,19 +930,59 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
    */
   auto readAsync(std::shared_ptr<TargetNodeBase> target_node,
                  uint32_t memory_address, uint32_t data_length,
-                 std::function<void(Packet)> on_complete) noexcept
-      -> std::future<std::expected<void, std::error_code>> override {
+                 std::function<void(std::expected<Packet, std::error_code>)>
+                     on_complete) noexcept
+      -> std::expected<uint16_t, std::error_code> override {
     if (auto_polling_mode_) {
-      std::promise<std::expected<void, std::error_code>> prom;
-      auto fut = prom.get_future();
-      prom.set_value(std::unexpected{
-          std::make_error_code(std::errc::operation_not_permitted)});
-      return fut;
+      return std::unexpected{
+          std::make_error_code(std::errc::operation_not_permitted)};
     }
-    auto async_op =
-        startReadAsyncOperation_(std::move(target_node), memory_address,
-                                 data_length, std::move(on_complete));
-    return std::move(async_op.future);
+    return transaction_id_database_
+        .acquire({
+            .reply = [this, on_complete](
+                         const Packet& packet) mutable noexcept -> void {
+              try {
+                on_complete(packet);
+              } catch (const std::exception& e) {
+                spw_rmap::debug::debug("Exception in writeAsync callback: ",
+                                       e.what());
+                return;
+              } catch (...) {
+                spw_rmap::debug::debug(
+                    "Unknown exception in writeAsync callback");
+                return;
+              }
+            },
+            .error =
+                [on_complete](std::error_code ec) mutable noexcept -> void {
+              try {
+                on_complete(std::unexpected{ec});
+              } catch (const std::exception& e) {
+                spw_rmap::debug::debug(
+                    "Exception in writeAsync error callback: ", e.what());
+                return;
+              } catch (...) {
+                spw_rmap::debug::debug(
+                    "Unknown exception in writeAsync error callback");
+                return;
+              }
+            },
+        })
+        .and_then([this, target_node = std::move(target_node), memory_address,
+                   data_length](uint16_t transaction_id) noexcept
+                      -> std::expected<uint16_t, std::error_code> {
+          return sendReadPacket_(std::move(target_node), transaction_id,
+                                 memory_address, data_length)
+              .transform_error(
+                  [this, transaction_id](
+                      std::error_code ec) noexcept -> std::error_code {
+                    transaction_id_database_.release(transaction_id);
+                    return ec;
+                  })
+              .transform([transaction_id]() noexcept -> uint16_t {
+                return transaction_id;
+              });
+        });
   }
 
   auto emitTimeCode(uint8_t timecode) noexcept

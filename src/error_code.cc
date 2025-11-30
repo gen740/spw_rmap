@@ -3,7 +3,7 @@
 namespace spw_rmap {
 
 auto status_code_category() noexcept -> const std::error_category& {
-  static StatusCodeCategory instance;
+  static RMAPStatusCodeCategory instance;
   return instance;
 }
 
