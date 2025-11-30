@@ -34,10 +34,9 @@ class SpwRmapNodeBase {
     return verify_mode_;
   }
 
-  auto acquireTransaction(
-      TransactionDatabase::CallbackPair callbacks = {}) noexcept
+  auto acquireTransaction(TransactionDatabase::Callback callback = {}) noexcept
       -> std::expected<uint16_t, std::error_code> {
-    return transaction_id_database_.acquire(std::move(callbacks));
+    return transaction_id_database_.acquire(std::move(callback));
   }
 
   [[nodiscard]] auto clampTransactionTimeout(
