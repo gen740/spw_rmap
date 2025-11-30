@@ -751,38 +751,19 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
     }
-    return acquireTransaction(
-               {
-                   .reply = [this, on_complete](
-                                const Packet& packet) mutable noexcept -> void {
-                     try {
-                       on_complete(packet);
-                     } catch (const std::exception& e) {
-                       spw_rmap::debug::debug(
-                           "Exception in writeAsync callback: ", e.what());
-                       return;
-                     } catch (...) {
-                       spw_rmap::debug::debug(
-                           "Unknown exception in writeAsync callback");
-                       return;
-                     }
-                   },
-                   .error = [on_complete](
-                                std::error_code ec) mutable noexcept -> void {
-                     try {
-                       on_complete(std::unexpected{ec});
-                     } catch (const std::exception& e) {
-                       spw_rmap::debug::debug(
-                           "Exception in writeAsync error callback: ",
-                           e.what());
-                       return;
-                     } catch (...) {
-                       spw_rmap::debug::debug(
-                           "Unknown exception in writeAsync error callback");
-                       return;
-                     }
-                   },
-               })
+    return acquireTransaction([this, on_complete = std::move(on_complete)](
+                                  std::expected<Packet, std::error_code>
+                                      result) mutable noexcept -> void {
+             try {
+               on_complete(std::move(result));
+             } catch (const std::exception& e) {
+               spw_rmap::debug::debug("Exception in writeAsync callback: ",
+                                      e.what());
+             } catch (...) {
+               spw_rmap::debug::debug(
+                   "Unknown exception in writeAsync callback");
+             }
+           })
         .and_then([this, target_node = std::move(target_node), memory_address,
                    data](uint16_t transaction_id) noexcept
                       -> std::expected<uint16_t, std::error_code> {
@@ -930,38 +911,19 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
     }
-    return acquireTransaction(
-               {
-                   .reply = [this, on_complete](
-                                const Packet& packet) mutable noexcept -> void {
-                     try {
-                       on_complete(packet);
-                     } catch (const std::exception& e) {
-                       spw_rmap::debug::debug(
-                           "Exception in writeAsync callback: ", e.what());
-                       return;
-                     } catch (...) {
-                       spw_rmap::debug::debug(
-                           "Unknown exception in writeAsync callback");
-                       return;
-                     }
-                   },
-                   .error = [on_complete](
-                                std::error_code ec) mutable noexcept -> void {
-                     try {
-                       on_complete(std::unexpected{ec});
-                     } catch (const std::exception& e) {
-                       spw_rmap::debug::debug(
-                           "Exception in writeAsync error callback: ",
-                           e.what());
-                       return;
-                     } catch (...) {
-                       spw_rmap::debug::debug(
-                           "Unknown exception in writeAsync error callback");
-                       return;
-                     }
-                   },
-               })
+    return acquireTransaction([this, on_complete = std::move(on_complete)](
+                                  std::expected<Packet, std::error_code>
+                                      result) mutable noexcept -> void {
+             try {
+               on_complete(std::move(result));
+             } catch (const std::exception& e) {
+               spw_rmap::debug::debug("Exception in readAsync callback: ",
+                                      e.what());
+             } catch (...) {
+               spw_rmap::debug::debug(
+                   "Unknown exception in readAsync callback");
+             }
+           })
         .and_then([this, target_node = std::move(target_node), memory_address,
                    data_length](uint16_t transaction_id) noexcept
                       -> std::expected<uint16_t, std::error_code> {

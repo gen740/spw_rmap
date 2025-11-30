@@ -17,10 +17,7 @@ namespace spw_rmap {
 
 class TransactionDatabase {
  public:
-  struct CallbackPair {
-    std::function<void(const Packet&)> reply{};
-    std::function<void(std::error_code)> error{};
-  };
+  using Callback = std::function<void(std::expected<Packet, std::error_code>)>;
 
   TransactionDatabase(uint16_t id_min, uint16_t id_max) noexcept
       : id_min_(id_min),
@@ -45,14 +42,10 @@ class TransactionDatabase {
     timeout_ = timeout;
   }
 
-  auto acquire() noexcept -> std::expected<uint16_t, std::error_code> {
-    return acquire(CallbackPair{});
-  }
-
-  auto acquire(CallbackPair callbacks) noexcept
+  auto acquire(Callback callback = Callback{}) noexcept
       -> std::expected<uint16_t, std::error_code> {
     for (size_t i = 0; i < entries_.size(); ++i) {
-      std::function<void(std::error_code)> error_callback = nullptr;
+      Callback timeout_callback = nullptr;
       const auto now = std::chrono::steady_clock::now();
       {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -61,28 +54,24 @@ class TransactionDatabase {
         if (next_id_ >= id_max_) {
           next_id_ = id_min_;
         }
-        const bool has_callbacks =
-            entry.reply_callback != nullptr || entry.error_callback != nullptr;
-        bool timed_out = false;
-        if (has_callbacks) {
-          timed_out =
-              timeout_.count() > 0 && (now - entry.last_used > timeout_);
-        }
+        const bool has_callback = static_cast<bool>(entry.callback);
+        const bool timed_out = has_callback && timeout_.count() > 0 &&
+                               (now - entry.last_used > timeout_);
         if (entry.available || timed_out) [[likely]] {
           if (!entry.available && timed_out) {
             spw_rmap::debug::debug(
                 "TransactionDatabase::acquire: Reusing timed-out transaction "
                 "ID ",
                 entry.transaction_id);
-            error_callback = std::move(entry.error_callback);
+            timeout_callback = std::move(entry.callback);
           }
           entry.available = false;
           entry.last_used = now;
-          entry.reply_callback = std::move(callbacks.reply);
-          entry.error_callback = std::move(callbacks.error);
+          entry.callback = std::move(callback);
           lock.unlock();
-          if (error_callback) {
-            error_callback(std::make_error_code(std::errc::timed_out));
+          if (timeout_callback) {
+            timeout_callback(
+                std::unexpected(std::make_error_code(std::errc::timed_out)));
           }
           return entry.transaction_id;
         }
@@ -94,36 +83,17 @@ class TransactionDatabase {
 
   auto invokeReplyCallback(uint16_t transaction_id,
                            const Packet& packet) noexcept -> bool {
-    std::function<void(const Packet&)> callback = nullptr;
+    Callback callback = nullptr;
     {
       std::lock_guard<std::mutex> lock(mutex_);
       auto* entry = getEntry_(transaction_id);
-      if (entry == nullptr || !entry->reply_callback) {
+      if (entry == nullptr || !entry->callback) {
         return false;
       }
-      callback = std::move(entry->reply_callback);
+      callback = std::move(entry->callback);
       entry->clear();
     }
     callback(packet);
-    return true;
-  }
-
-  auto invokeErrorCallback(uint16_t transaction_id,
-                           std::error_code error) noexcept -> bool {
-    std::function<void(std::error_code)> callback = nullptr;
-    {
-      std::lock_guard<std::mutex> lock(mutex_);
-      auto* entry = getEntry_(transaction_id);
-      if (entry == nullptr || !entry->error_callback) {
-        if (entry != nullptr) {
-          entry->reply_callback = nullptr;
-        }
-        return false;
-      }
-      callback = std::move(entry->error_callback);
-      entry->clear();
-    }
-    callback(error);
     return true;
   }
 
@@ -144,13 +114,11 @@ class TransactionDatabase {
     std::chrono::steady_clock::time_point last_used =
         std::chrono::steady_clock::time_point::min();
     uint16_t transaction_id = 0;
-    std::function<void(const Packet&)> reply_callback = nullptr;
-    std::function<void(std::error_code)> error_callback = nullptr;
+    Callback callback = nullptr;
     auto clear() noexcept -> void {
       available = true;
       last_used = std::chrono::steady_clock::time_point::min();
-      reply_callback = nullptr;
-      error_callback = nullptr;
+      callback = nullptr;
     }
   };
 
