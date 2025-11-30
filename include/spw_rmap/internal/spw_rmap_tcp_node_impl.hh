@@ -75,6 +75,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   std::vector<uint8_t> send_buf_ = {};
 
   TransactionDatabase transaction_id_database_;
+  std::chrono::milliseconds transaction_id_timeout_{std::chrono::seconds(1)};
   uint8_t initiator_logical_address_ = 0xFE;
   BufferPolicy buffer_policy_ = BufferPolicy::AutoResize;
   std::chrono::microseconds send_timeout_{std::chrono::milliseconds{500}};
@@ -105,7 +106,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         transaction_id_database_(config.transaction_id_min,
                                  config.transaction_id_max),
         buffer_policy_(config.buffer_policy),
-        send_timeout_(config.send_timeout) {}
+        send_timeout_(config.send_timeout) {
+    transaction_id_database_.setTimeout(transaction_id_timeout_);
+  }
 
  public:
   auto setInitiatorLogicalAddress(uint8_t address) -> void {
@@ -131,6 +134,17 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto setPort_(std::string port) noexcept -> void {
     tcp_backend_->setPort(std::move(port));
+  }
+
+  [[nodiscard]] auto clampTimeout_(std::chrono::milliseconds requested)
+      const noexcept -> std::chrono::milliseconds {
+    if (transaction_id_timeout_.count() == 0) {
+      return requested;
+    }
+    if (requested.count() == 0 || requested > transaction_id_timeout_) {
+      return transaction_id_timeout_;
+    }
+    return requested;
   }
 
   auto getSendTimeout_() const noexcept -> std::chrono::microseconds {
@@ -630,7 +644,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     on_timecode_callback_ = std::move(onTimeCode);
   }
 
-  auto setTimeout(std::chrono::milliseconds timeout) noexcept -> void {
+  auto setTransactionTimeout(std::chrono::milliseconds timeout) noexcept
+      -> void override {
+    transaction_id_timeout_ = timeout;
     transaction_id_database_.setTimeout(timeout);
   }
 
@@ -658,12 +674,15 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
              std::chrono::milliseconds timeout =
                  std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
+    auto effective_timeout = clampTimeout_(timeout);
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
       return ensureConnectionReady_()
-          .and_then([this, timeout]() -> std::expected<void, std::error_code> {
-            return tcp_backend_->setReceiveTimeout(timeout);
-          })
+          .and_then(
+              [this,
+               effective_timeout]() -> std::expected<void, std::error_code> {
+                return tcp_backend_->setReceiveTimeout(effective_timeout);
+              })
           .and_then([this, &target_node, &memory_address,
                      &data]() -> std::expected<uint16_t, std::error_code> {
             return transaction_id_database_.acquire();
@@ -725,10 +744,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                           write_cv.notify_one();
                         })
           .and_then([this, &write_res, &write_completed, &write_mtx, &write_cv,
-                     &timeout](uint16_t transaction_id) noexcept
+                     effective_timeout](uint16_t transaction_id) noexcept
                         -> std::expected<void, std::error_code> {
             std::unique_lock<std::mutex> lock(write_mtx);
-            if (write_cv.wait_for(lock, timeout,
+            if (write_cv.wait_for(lock, effective_timeout,
                                   [&write_completed, this] -> auto {
                                     return write_completed;
                                   })) {
@@ -815,12 +834,15 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             std::chrono::milliseconds timeout =
                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
+    auto effective_timeout = clampTimeout_(timeout);
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
       return ensureConnectionReady_()
-          .and_then([this, &timeout]() -> std::expected<void, std::error_code> {
-            return tcp_backend_->setReceiveTimeout(timeout);
-          })
+          .and_then(
+              [this,
+               effective_timeout]() -> std::expected<void, std::error_code> {
+                return tcp_backend_->setReceiveTimeout(effective_timeout);
+              })
           .and_then([this, &target_node, &memory_address,
                      &data]() -> std::expected<uint16_t, std::error_code> {
             return transaction_id_database_.acquire();
@@ -907,10 +929,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                          read_cv.notify_one();
                        })
           .and_then([this, &read_res, &read_completed, &read_mtx, &read_cv,
-                     &timeout](uint16_t transaction_id) noexcept
+                     effective_timeout](uint16_t transaction_id) noexcept
                         -> std::expected<void, std::error_code> {
             std::unique_lock<std::mutex> lock(read_mtx);
-            if (read_cv.wait_for(lock, timeout,
+            if (read_cv.wait_for(lock, effective_timeout,
                                  [&read_completed, this] -> auto {
                                    return read_completed;
                                  })) {

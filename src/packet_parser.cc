@@ -193,7 +193,8 @@ auto ParseRMAPPacket(const std::span<const uint8_t> data) noexcept
   while (data[head] < 0x20) {
     head++;
     if (head >= data.size()) [[unlikely]] {
-      return std::unexpected(make_error_code(RMAPParseStatus::IncompletePacket));
+      return std::unexpected(
+          make_error_code(RMAPParseStatus::IncompletePacket));
     }
   }
   // Check size

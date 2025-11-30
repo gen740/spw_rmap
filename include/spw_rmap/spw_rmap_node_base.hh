@@ -123,6 +123,19 @@ class SpwRmapNodeBase {
   virtual auto emitTimeCode(uint8_t timecode) noexcept
       -> std::expected<void, std::error_code> = 0;
 
+  /**
+   * @brief Configures the timeout used by the transaction ID database.
+   *
+   * Every in-flight transaction reserves a Transaction ID; when a reply takes
+   * longer than this duration the entry is considered lost and will eventually
+   * be recycled. If `read`/`write` are invoked with a timeout that exceeds this
+   * limit (non-zero timeout), the request timeout is clamped to the Transaction
+   * ID timeout to guarantee consistency. Supplying `0ms` disables automatic
+   * reclamation and clamping entirely.
+   */
+  virtual auto setTransactionTimeout(std::chrono::milliseconds timeout) noexcept
+      -> void = 0;
+
   auto setVerifyMode(bool verify_mode) noexcept -> void {
     verify_mode_ = verify_mode;
   }
