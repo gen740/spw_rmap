@@ -732,9 +732,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                                   [&write_completed, this] -> auto {
                                     return write_completed;
                                   })) {
-              transaction_id_database_.release(transaction_id);
               return write_res;
             }
+            transaction_id_database_.release(transaction_id);
             return std::unexpected{std::make_error_code(std::errc::timed_out)};
           });
     }
@@ -914,9 +914,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                                  [&read_completed, this] -> auto {
                                    return read_completed;
                                  })) {
-              transaction_id_database_.release(transaction_id);
               return read_res;
             }
+            transaction_id_database_.release(transaction_id);
             return std::unexpected{std::make_error_code(std::errc::timed_out)};
           });
     }
