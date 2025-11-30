@@ -38,8 +38,8 @@ struct SpwRmapTCPNodeConfig {
   size_t recv_buffer_size = 4096;
   size_t send_pool_size = 4;
   size_t recv_pool_size = 4;
-  uint16_t transaction_id_min = 0x0020;
-  uint16_t transaction_id_max = 0x0040;
+  uint16_t transaction_id_min = 0x0000;
+  uint16_t transaction_id_max = 0x00FF;
   BufferPolicy buffer_policy = BufferPolicy::AutoResize;
   std::chrono::microseconds send_timeout = std::chrono::milliseconds{500};
 };
@@ -666,7 +666,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                       std::make_error_code(std::errc::operation_canceled)};
                 }
               }
-              break;
+              return {};
             }
             case PacketType::Write: {
               if (on_write_callback_) {
@@ -680,12 +680,11 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                       std::make_error_code(std::errc::operation_canceled)};
                 }
               }
-              break;
+              return {};
             }
             default:
-              break;
+              return {};
           }
-          return {};
         })
         .or_else(
             [](std::error_code ec) -> std::expected<void, std::error_code> {
@@ -790,7 +789,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   "Received packet with unexpected Transaction ID: ",
                   packet.transactionID);
               return std::unexpected{
-                  std::make_error_code(std::errc::bad_message)};
+                  make_error_code(ParseStatus::NotReplyPacket)};
             }
             if (packet.type == PacketType::WriteReply) {
               transaction_id_database_.release(
