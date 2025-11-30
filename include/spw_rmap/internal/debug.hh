@@ -14,10 +14,7 @@ inline constexpr bool enabled = static_cast<bool>(SPW_RMAP_DEBUG);
 
 #if SPW_RMAP_DEBUG
 namespace detail {
-inline auto runtime_flag() noexcept -> std::atomic<bool>& {
-  static std::atomic<bool> flag{true};
-  return flag;
-}
+auto runtime_flag() noexcept -> std::atomic<bool>&;
 }  // namespace detail
 
 inline void set_runtime_enabled(bool value) noexcept {
