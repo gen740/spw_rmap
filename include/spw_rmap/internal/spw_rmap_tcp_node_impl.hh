@@ -18,7 +18,6 @@
 #include <vector>
 
 #include "spw_rmap/internal/debug.hh"
-#include "spw_rmap/internal/transaction_database.hh"
 #include "spw_rmap/packet_builder.hh"
 #include "spw_rmap/packet_parser.hh"
 #include "spw_rmap/spw_rmap_node_base.hh"
@@ -73,9 +72,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   std::vector<uint8_t> recv_buf_ = {};
   std::vector<uint8_t> send_buf_ = {};
-
-  TransactionDatabase transaction_id_database_;
-  std::chrono::milliseconds transaction_id_timeout_{std::chrono::seconds(1)};
   uint8_t initiator_logical_address_ = 0xFE;
   BufferPolicy buffer_policy_ = BufferPolicy::AutoResize;
   std::chrono::microseconds send_timeout_{std::chrono::milliseconds{500}};
@@ -99,16 +95,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
  public:
   explicit SpwRmapTCPNodeImpl(SpwRmapTCPNodeConfig config) noexcept
-      : tcp_backend_(std::make_unique<Backend>(std::move(config.ip_address),
+      : SpwRmapNodeBase(config.transaction_id_min, config.transaction_id_max),
+        tcp_backend_(std::make_unique<Backend>(std::move(config.ip_address),
                                                std::move(config.port))),
         recv_buf_(config.recv_buffer_size),
         send_buf_(config.send_buffer_size),
-        transaction_id_database_(config.transaction_id_min,
-                                 config.transaction_id_max),
         buffer_policy_(config.buffer_policy),
-        send_timeout_(config.send_timeout) {
-    transaction_id_database_.setTimeout(transaction_id_timeout_);
-  }
+        send_timeout_(config.send_timeout) {}
 
  public:
   auto setInitiatorLogicalAddress(uint8_t address) -> void {
@@ -134,17 +127,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto setPort_(std::string port) noexcept -> void {
     tcp_backend_->setPort(std::move(port));
-  }
-
-  [[nodiscard]] auto clampTimeout_(std::chrono::milliseconds requested)
-      const noexcept -> std::chrono::milliseconds {
-    if (transaction_id_timeout_.count() == 0) {
-      return requested;
-    }
-    if (requested.count() == 0 || requested > transaction_id_timeout_) {
-      return transaction_id_timeout_;
-    }
-    return requested;
   }
 
   auto getSendTimeout_() const noexcept -> std::chrono::microseconds {
@@ -552,14 +534,14 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           switch (packet.type) {
             case PacketType::ReadReply:
             case PacketType::WriteReply: {
-              if (!transaction_id_database_.contains(packet.transactionID)) {
+              if (!getTransactionDatabase().contains(packet.transactionID)) {
                 spw_rmap::debug::debug(
                     "Received packet with out-of-range Transaction ID: ",
                     packet.transactionID);
                 return std::unexpected{
                     std::make_error_code(std::errc::bad_message)};
               }
-              const auto handled = transaction_id_database_.invokeReplyCallback(
+              const auto handled = getTransactionDatabase().invokeReplyCallback(
                   packet.transactionID, packet);
               if (!handled) {
                 std::cerr << "No callback registered for Transaction ID: "
@@ -644,12 +626,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     on_timecode_callback_ = std::move(onTimeCode);
   }
 
-  auto setTransactionTimeout(std::chrono::milliseconds timeout) noexcept
-      -> void override {
-    transaction_id_timeout_ = timeout;
-    transaction_id_database_.setTimeout(timeout);
-  }
-
   /**
    * @brief Enables or disables auto polling.
    *
@@ -674,7 +650,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
              std::chrono::milliseconds timeout =
                  std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
-    auto effective_timeout = clampTimeout_(timeout);
+    auto effective_timeout = clampTransactionTimeout(timeout);
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
       return ensureConnectionReady_()
@@ -685,7 +661,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               })
           .and_then([this, &target_node, &memory_address,
                      &data]() -> std::expected<uint16_t, std::error_code> {
-            return transaction_id_database_.acquire();
+            return acquireTransaction();
           })
           .and_then([this, &target_node, &memory_address, &data,
                      &transaction_id_memo](uint16_t transaction_id)
@@ -709,8 +685,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   make_error_code(RMAPParseStatus::NotReplyPacket)};
             }
             if (packet.type == PacketType::WriteReply) {
-              transaction_id_database_.release(
-                  static_cast<uint16_t>(transaction_id_memo));
+              cancelTransaction(static_cast<uint16_t>(transaction_id_memo));
               return {};
             } else {
               return std::unexpected{
@@ -720,8 +695,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           .or_else([this, &transaction_id_memo](std::error_code ec)
                        -> std::expected<void, std::error_code> {
             if (transaction_id_memo >= 0) {
-              transaction_id_database_.release(
-                  static_cast<uint16_t>(transaction_id_memo));
+              cancelTransaction(static_cast<uint16_t>(transaction_id_memo));
             }
             return std::unexpected{ec};
           });
@@ -753,7 +727,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                                   })) {
               return write_res;
             }
-            transaction_id_database_.release(transaction_id);
+            cancelTransaction(transaction_id);
             return std::unexpected{std::make_error_code(std::errc::timed_out)};
           });
     }
@@ -775,37 +749,38 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
     }
-    return transaction_id_database_
-        .acquire({
-            .reply = [this, on_complete](
-                         const Packet& packet) mutable noexcept -> void {
-              try {
-                on_complete(packet);
-              } catch (const std::exception& e) {
-                spw_rmap::debug::debug("Exception in writeAsync callback: ",
-                                       e.what());
-                return;
-              } catch (...) {
-                spw_rmap::debug::debug(
-                    "Unknown exception in writeAsync callback");
-                return;
-              }
-            },
-            .error =
-                [on_complete](std::error_code ec) mutable noexcept -> void {
-              try {
-                on_complete(std::unexpected{ec});
-              } catch (const std::exception& e) {
-                spw_rmap::debug::debug(
-                    "Exception in writeAsync error callback: ", e.what());
-                return;
-              } catch (...) {
-                spw_rmap::debug::debug(
-                    "Unknown exception in writeAsync error callback");
-                return;
-              }
-            },
-        })
+    return acquireTransaction(
+               {
+                   .reply = [this, on_complete](
+                                const Packet& packet) mutable noexcept -> void {
+                     try {
+                       on_complete(packet);
+                     } catch (const std::exception& e) {
+                       spw_rmap::debug::debug(
+                           "Exception in writeAsync callback: ", e.what());
+                       return;
+                     } catch (...) {
+                       spw_rmap::debug::debug(
+                           "Unknown exception in writeAsync callback");
+                       return;
+                     }
+                   },
+                   .error = [on_complete](
+                                std::error_code ec) mutable noexcept -> void {
+                     try {
+                       on_complete(std::unexpected{ec});
+                     } catch (const std::exception& e) {
+                       spw_rmap::debug::debug(
+                           "Exception in writeAsync error callback: ",
+                           e.what());
+                       return;
+                     } catch (...) {
+                       spw_rmap::debug::debug(
+                           "Unknown exception in writeAsync error callback");
+                       return;
+                     }
+                   },
+               })
         .and_then([this, target_node = std::move(target_node), memory_address,
                    data](uint16_t transaction_id) noexcept
                       -> std::expected<uint16_t, std::error_code> {
@@ -814,7 +789,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               .transform_error(
                   [this, transaction_id](
                       std::error_code ec) noexcept -> std::error_code {
-                    transaction_id_database_.release(transaction_id);
+                    cancelTransaction(transaction_id);
                     return ec;
                   })
               .transform([transaction_id]() noexcept -> uint16_t {
@@ -834,7 +809,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             std::chrono::milliseconds timeout =
                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
-    auto effective_timeout = clampTimeout_(timeout);
+    auto effective_timeout = clampTransactionTimeout(timeout);
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
       return ensureConnectionReady_()
@@ -845,7 +820,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               })
           .and_then([this, &target_node, &memory_address,
                      &data]() -> std::expected<uint16_t, std::error_code> {
-            return transaction_id_database_.acquire();
+            return acquireTransaction();
           })
           .and_then([this, &target_node, &memory_address, &data,
                      &transaction_id_memo](uint16_t transaction_id)
@@ -856,7 +831,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                 .transform_error(
                     [this, transaction_id](
                         std::error_code ec) noexcept -> std::error_code {
-                      transaction_id_database_.release(transaction_id);
+                      cancelTransaction(transaction_id);
                       return ec;
                     });
           })
@@ -888,15 +863,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   std::make_error_code(std::errc::bad_message)};
             }
             std::ranges::copy(packet.data, data.begin());
-            transaction_id_database_.release(
-                static_cast<uint16_t>(transaction_id_memo));
+            cancelTransaction(static_cast<uint16_t>(transaction_id_memo));
             return {};
           })
           .or_else([this, &transaction_id_memo](std::error_code ec)
                        -> std::expected<void, std::error_code> {
             if (transaction_id_memo >= 0) {
-              transaction_id_database_.release(
-                  static_cast<uint16_t>(transaction_id_memo));
+              cancelTransaction(static_cast<uint16_t>(transaction_id_memo));
             }
             return std::unexpected{ec};
           });
@@ -938,7 +911,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                                  })) {
               return read_res;
             }
-            transaction_id_database_.release(transaction_id);
+            cancelTransaction(transaction_id);
             return std::unexpected{std::make_error_code(std::errc::timed_out)};
           });
     }
@@ -959,37 +932,38 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
     }
-    return transaction_id_database_
-        .acquire({
-            .reply = [this, on_complete](
-                         const Packet& packet) mutable noexcept -> void {
-              try {
-                on_complete(packet);
-              } catch (const std::exception& e) {
-                spw_rmap::debug::debug("Exception in writeAsync callback: ",
-                                       e.what());
-                return;
-              } catch (...) {
-                spw_rmap::debug::debug(
-                    "Unknown exception in writeAsync callback");
-                return;
-              }
-            },
-            .error =
-                [on_complete](std::error_code ec) mutable noexcept -> void {
-              try {
-                on_complete(std::unexpected{ec});
-              } catch (const std::exception& e) {
-                spw_rmap::debug::debug(
-                    "Exception in writeAsync error callback: ", e.what());
-                return;
-              } catch (...) {
-                spw_rmap::debug::debug(
-                    "Unknown exception in writeAsync error callback");
-                return;
-              }
-            },
-        })
+    return acquireTransaction(
+               {
+                   .reply = [this, on_complete](
+                                const Packet& packet) mutable noexcept -> void {
+                     try {
+                       on_complete(packet);
+                     } catch (const std::exception& e) {
+                       spw_rmap::debug::debug(
+                           "Exception in writeAsync callback: ", e.what());
+                       return;
+                     } catch (...) {
+                       spw_rmap::debug::debug(
+                           "Unknown exception in writeAsync callback");
+                       return;
+                     }
+                   },
+                   .error = [on_complete](
+                                std::error_code ec) mutable noexcept -> void {
+                     try {
+                       on_complete(std::unexpected{ec});
+                     } catch (const std::exception& e) {
+                       spw_rmap::debug::debug(
+                           "Exception in writeAsync error callback: ",
+                           e.what());
+                       return;
+                     } catch (...) {
+                       spw_rmap::debug::debug(
+                           "Unknown exception in writeAsync error callback");
+                       return;
+                     }
+                   },
+               })
         .and_then([this, target_node = std::move(target_node), memory_address,
                    data_length](uint16_t transaction_id) noexcept
                       -> std::expected<uint16_t, std::error_code> {
@@ -998,7 +972,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               .transform_error(
                   [this, transaction_id](
                       std::error_code ec) noexcept -> std::error_code {
-                    transaction_id_database_.release(transaction_id);
+                    cancelTransaction(transaction_id);
                     return ec;
                   })
               .transform([transaction_id]() noexcept -> uint16_t {
