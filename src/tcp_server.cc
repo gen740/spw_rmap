@@ -29,7 +29,7 @@ inline void log_errno_(const char* msg, int err) noexcept {
     (void)err;
     return;
   }
-  if (!spw_rmap::debug::is_runtime_enabled()) {
+  if (!spw_rmap::debug::is_runtime_enabled()) [[likely]] {
     (void)msg;
     (void)err;
     return;
@@ -51,12 +51,12 @@ static inline auto set_listening_sockopt(int fd)
 #endif
   // CLOEXEC for listen fd as well.
   const int fdflags = ::fcntl(fd, F_GETFD);
-  if (fdflags < 0) {
+  if (fdflags < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to get FD flags on listening socket", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
-  if (::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) {
+  if (::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set FD_CLOEXEC on listening socket", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -68,14 +68,16 @@ static inline auto server_set_sockopts(int fd)
     -> std::expected<void, std::error_code> {
   int yes = 1;
   // Disable Nagle for latency-sensitive traffic.
-  if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0) {
+  if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set TCP_NODELAY", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
 #ifdef __APPLE__
   // Avoid SIGPIPE on write-side errors.
-  if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) != 0) {
+  if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set SO_NOSIGPIPE", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -83,12 +85,12 @@ static inline auto server_set_sockopts(int fd)
 #endif
   // Ensure close-on-exec (harmless if already set).
   const int fdflags = ::fcntl(fd, F_GETFD);
-  if (fdflags < 0) {
+  if (fdflags < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to get FD flags on server socket", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
-  if (::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) {
+  if (::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set FD_CLOEXEC on server socket", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -97,7 +99,7 @@ static inline auto server_set_sockopts(int fd)
 }
 
 static auto socket_alive_(int fd) noexcept -> bool {
-  if (fd < 0) {
+  if (fd < 0) [[unlikely]] {
     return false;
   }
   pollfd pfd{
@@ -113,7 +115,7 @@ static auto socket_alive_(int fd) noexcept -> bool {
   do {
     prc = ::poll(&pfd, 1, 0);
   } while (prc < 0 && errno == EINTR);
-  if (prc < 0) {
+  if (prc < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("poll failed while checking server socket", err);
     return false;
@@ -125,7 +127,7 @@ static auto socket_alive_(int fd) noexcept -> bool {
                      )) {
     return false;
   }
-  if ((pfd.revents & POLLIN) != 0) {
+  if ((pfd.revents & POLLIN) != 0) [[unlikely]] {
     uint8_t tmp{};
     const ssize_t n = ::recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT);
     if (n == 0) {
@@ -141,7 +143,7 @@ static auto socket_alive_(int fd) noexcept -> bool {
 }
 
 auto TCPServer::close_retry_(int fd) noexcept -> void {
-  if (fd < 0) {
+  if (fd < 0) [[unlikely]] {
     return;
   }
   int r = 0;
@@ -174,7 +176,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
   addrinfo* res = nullptr;
   if (int rc = ::getaddrinfo(std::string(bind_address_).c_str(),
                              std::string(port_).c_str(), &hints, &res);
-      rc != 0) {
+      rc != 0) [[unlikely]] {
     spw_rmap::debug::debug("getaddrinfo error: ", ::gai_strerror(rc));
     return std::unexpected{std::error_code(rc, gai_category())};
   }
@@ -183,7 +185,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
 
   for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
     listen_fd_ = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if (listen_fd_ < 0) {
+    if (listen_fd_ < 0) [[unlikely]] {
       const int err = errno;
       log_errno_("Failed to create listening socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
@@ -196,7 +198,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
       listen_fd_ = -1;
       continue;
     }
-    if (::bind(listen_fd_, ai->ai_addr, ai->ai_addrlen) != 0) {
+    if (::bind(listen_fd_, ai->ai_addr, ai->ai_addrlen) != 0) [[unlikely]] {
       const int err = errno;
       log_errno_("Failed to bind listening socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
@@ -204,7 +206,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
       listen_fd_ = -1;
       continue;
     }
-    if (::listen(listen_fd_, SOMAXCONN) != 0) {
+    if (::listen(listen_fd_, SOMAXCONN) != 0) [[unlikely]] {
       const int err = errno;
       log_errno_("Failed to listen on socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
@@ -215,12 +217,12 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
 
     for (;;) {
       client_fd_ = ::accept(listen_fd_, nullptr, nullptr);
-      if (client_fd_ < 0 && errno == EINTR) {
+      if (client_fd_ < 0 && errno == EINTR) [[unlikely]] {
         continue;
       }
       break;
     }
-    if (client_fd_ < 0) {
+    if (client_fd_ < 0) [[unlikely]] {
       const int err = errno;
       log_errno_("Failed to accept client socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
@@ -247,7 +249,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
                 });
   }
   ::freeaddrinfo(res);
-  if (client_fd_ < 0) {
+  if (client_fd_ < 0) [[unlikely]] {
     client_fd_ = -1;
     return last;
   }
@@ -258,10 +260,10 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
 
 auto TCPServer::ensureConnect() noexcept
     -> std::expected<void, std::error_code> {
-  if (client_fd_ >= 0 && socket_alive_(client_fd_)) {
+  if (client_fd_ >= 0 && socket_alive_(client_fd_)) [[likely]] {
     return {};
   }
-  if (client_fd_ >= 0) {
+  if (client_fd_ >= 0) [[likely]] {
     spw_rmap::debug::debug("Client socket unhealthy, reopening server socket");
     close_retry_(client_fd_);
     client_fd_ = -1;
@@ -278,7 +280,7 @@ TCPServer::~TCPServer() noexcept {
 
 auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  if (timeout < std::chrono::microseconds::zero()) {
+  if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
@@ -290,7 +292,8 @@ auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
   tv.tv_sec = tv_sec;
   tv.tv_usec = tv_usec;
 
-  if (::setsockopt(client_fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+  if (::setsockopt(client_fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set send timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -300,7 +303,7 @@ auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPServer::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  if (timeout < std::chrono::microseconds::zero()) {
+  if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
@@ -312,7 +315,8 @@ auto TCPServer::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
   tv.tv_sec = tv_sec;
   tv.tv_usec = tv_usec;
 
-  if (::setsockopt(client_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+  if (::setsockopt(client_fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set receive timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -329,7 +333,7 @@ auto TCPServer::sendAll(std::span<const uint8_t> data) noexcept
     constexpr int kFlags = 0;  // SO_NOSIGPIPE is set in set_sockopts()
 #endif
     const ssize_t n = ::send(client_fd_, data.data(), data.size(), kFlags);
-    if (n < 0) {
+    if (n < 0) [[unlikely]] {
       const int err = errno;
       if (err == EINTR) {
         continue;
@@ -356,7 +360,7 @@ auto TCPServer::recvSome(std::span<uint8_t> buf) noexcept
   }
   for (;;) {
     const ssize_t n = ::recv(client_fd_, buf.data(), buf.size(), 0);
-    if (n < 0) {
+    if (n < 0) [[unlikely]] {
       const int err = errno;
       if (err == EINTR) {
         continue;
@@ -373,12 +377,12 @@ auto TCPServer::recvSome(std::span<uint8_t> buf) noexcept
 }
 
 auto TCPServer::shutdown() noexcept -> std::expected<void, std::error_code> {
-  if (client_fd_ < 0) {
+  if (client_fd_ < 0) [[unlikely]] {
     spw_rmap::debug::debug("Client socket not connected");
     return std::unexpected(
         std::make_error_code(std::errc::bad_file_descriptor));
   }
-  if (::shutdown(client_fd_, SHUT_RDWR) < 0) {
+  if (::shutdown(client_fd_, SHUT_RDWR) < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to shutdown client socket", err);
     return std::unexpected(std::error_code(err, std::generic_category()));
