@@ -92,8 +92,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   std::mutex send_mtx_;
 
-  std::string ip_address_;
-  std::string port_;
+  SpwRmapTCPNodeConfig config_;
 
  public:
   explicit SpwRmapTCPNodeImpl(SpwRmapTCPNodeConfig config) noexcept
@@ -103,8 +102,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         send_buf_(config.send_buffer_size),
         buffer_policy_(config.buffer_policy),
         send_timeout_(config.send_timeout),
-        ip_address_(config.ip_address),
-        port_(config.port) {}
+        config_(config) {}
 
   auto ensureTCPConnection() noexcept -> std::expected<void, std::error_code> {
     return tcp_backend_->ensureConnect().and_then(
@@ -113,11 +111,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         });
   }
 
-  auto getIPAddress() const noexcept -> const std::string& {
-    return ip_address_;
+  auto getConfig() const noexcept -> const SpwRmapTCPNodeConfig& {
+    return config_;
   }
-
-  auto getPort() const noexcept -> const std::string& { return port_; }
 
  protected:
   auto getBackend_() noexcept -> std::unique_ptr<Backend>& {
