@@ -214,12 +214,14 @@ TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
         EXPECT_EQ(packet.value().type, spw_rmap::PacketType::WriteReply);
       });
 
-  node.enqueueIncoming(buildWriteReplyFrame(0x0020));
+  ASSERT_TRUE(write_res.has_value());
+  auto transaction_id = write_res.value();
+
+  node.enqueueIncoming(buildWriteReplyFrame(transaction_id));
 
   auto poll_result = node.poll();
   ASSERT_TRUE(poll_result.has_value());
 
-  EXPECT_TRUE(write_res.has_value());
   EXPECT_TRUE(callback_called.load());
 }
 
@@ -239,12 +241,14 @@ TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
       [&callback_called](std::expected<spw_rmap::Packet, std::error_code>)
           -> void { callback_called = true; });
 
-  node.enqueueIncoming(buildWriteReplyFrame(0x0020));
+  ASSERT_TRUE(write_res.has_value());
+  auto transaction_id = write_res.value();
+
+  node.enqueueIncoming(buildWriteReplyFrame(transaction_id));
 
   auto poll_result = node.poll();
   ASSERT_TRUE(poll_result.has_value());
 
-  EXPECT_TRUE(write_res.has_value());
   EXPECT_TRUE(callback_called.load());
 }
 
