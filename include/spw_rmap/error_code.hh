@@ -20,7 +20,7 @@ enum class ParseStatus {
 class StatusCodeCategory final : public std::error_category {
  public:
   [[nodiscard]] auto name() const noexcept -> const char* override {
-    return "StatusCode";
+    return "RMAPStatusCode";
   }
 
   [[nodiscard]] auto message(int ev) const -> std::string override {
