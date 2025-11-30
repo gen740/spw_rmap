@@ -91,6 +91,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   std::atomic<bool> auto_polling_mode_{false};
 
   std::mutex send_mtx_;
+  mutable std::mutex auto_polling_serial_mtx_;
 
   SpwRmapTCPNodeConfig config_;
 
@@ -656,6 +657,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                  std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
     if (auto_polling_mode_) {
+      std::unique_lock<std::mutex> autopoll_lock(auto_polling_serial_mtx_);
       int32_t transaction_id_memo = -1;
       return ensureTCPConnection()
           .and_then([this, timeout]() -> std::expected<void, std::error_code> {
@@ -791,6 +793,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
     if (auto_polling_mode_) {
+      std::unique_lock<std::mutex> autopoll_lock(auto_polling_serial_mtx_);
       int32_t transaction_id_memo = -1;
       return ensureTCPConnection()
           .and_then([this, timeout]() -> std::expected<void, std::error_code> {
