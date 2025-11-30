@@ -28,7 +28,7 @@ inline void log_errno_(const char* msg, int err) noexcept {
     (void)err;
     return;
   }
-  if (!spw_rmap::debug::is_runtime_enabled()) {
+  if (!spw_rmap::debug::is_runtime_enabled()) [[likely]] {
     (void)msg;
     (void)err;
     return;
@@ -41,7 +41,7 @@ inline void log_errno_(const char* msg, int err) noexcept {
 }  // namespace
 
 static auto close_retry_(int fd) noexcept -> void {
-  if (fd >= 0) {
+  if (fd >= 0) [[likely]] {
     auto r = 0;
     do {
       r = ::close(fd);
@@ -53,7 +53,7 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
                                   socklen_t addrlen,
                                   std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  if (timeout < std::chrono::microseconds::zero()) {
+  if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
@@ -65,14 +65,14 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
           : static_cast<int>(ms64);
 
   const int oldfl = ::fcntl(fd, F_GETFL);
-  if (oldfl < 0) {
+  if (oldfl < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to get fd flags", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
   const bool was_blocking = (oldfl & O_NONBLOCK) == 0;
-  if (was_blocking) {
-    if (::fcntl(fd, F_SETFL, oldfl | O_NONBLOCK) < 0) {
+  if (was_blocking) [[unlikely]] {
+    if (::fcntl(fd, F_SETFL, oldfl | O_NONBLOCK) < 0) [[unlikely]] {
       const int err = errno;
       log_errno_("Failed to set fd to non-blocking", err);
       return std::unexpected{std::error_code(err, std::system_category())};
@@ -89,7 +89,7 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
     int fl;
     bool on;
     ~Restore() {
-      if (on) {
+      if (on) [[unlikely]] {
         (void)::fcntl(fd, F_SETFL, fl);
       }
     }
@@ -100,12 +100,12 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
     rc = ::connect(fd, addr, addrlen);
   } while (rc != 0 && errno == EINTR);
 
-  if (rc == 0) {
+  if (rc == 0) [[likely]] {
     return {};  // Connected immediately.
   }
 
   const int err = errno;
-  if (err != EINPROGRESS) {
+  if (err != EINPROGRESS) [[unlikely]] {
     log_errno_("Connect failed", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
@@ -115,11 +115,11 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
     prc = ::poll(&pfd, 1, ms);
   } while (prc < 0 && errno == EINTR);
 
-  if (prc == 0) {
+  if (prc == 0) [[unlikely]] {
     spw_rmap::debug::debug("Connect timed out");
     return std::unexpected{std::error_code(ETIMEDOUT, std::system_category())};
   }
-  if (prc < 0) {
+  if (prc < 0) [[unlikely]] {
     const int poll_err = errno;
     log_errno_("Poll failed during connect", poll_err);
     return std::unexpected{std::error_code(poll_err, std::system_category())};
@@ -127,13 +127,13 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
 
   int soerr = 0;
   auto slen = static_cast<socklen_t>(sizeof(soerr));
-  if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &slen) != 0) {
+  if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &slen) != 0) [[unlikely]] {
     const int soerr_errno = errno;
     log_errno_("getsockopt failed after poll", soerr_errno);
     return std::unexpected{
         std::error_code(soerr_errno, std::system_category())};
   }
-  if (soerr != 0) {
+  if (soerr != 0) [[unlikely]] {
     log_errno_("Connect failed after poll", soerr);
     return std::unexpected{std::error_code(soerr, std::system_category())};
   }
@@ -143,20 +143,23 @@ static auto connect_with_timeout_(const int fd, const sockaddr* addr,
 static auto set_sockopts(int fd) noexcept
     -> std::expected<void, std::error_code> {
   int yes = 1;
-  if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0) {
+  if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set TCP_NODELAY", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
 #ifdef __APPLE__
-  if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) != 0) {
+  if (::setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set SO_NOSIGPIPE", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
 #endif
   const int fdflags = ::fcntl(fd, F_GETFD);
-  if (fdflags < 0 || ::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0) {
+  if (fdflags < 0 || ::fcntl(fd, F_SETFD, fdflags | FD_CLOEXEC) < 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set FD_CLOEXEC", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -165,7 +168,7 @@ static auto set_sockopts(int fd) noexcept
 }
 
 static auto socket_alive_(int fd) noexcept -> bool {
-  if (fd < 0) {
+  if (fd < 0) [[unlikely]] {
     return false;
   }
   pollfd pfd{
@@ -181,7 +184,7 @@ static auto socket_alive_(int fd) noexcept -> bool {
   do {
     prc = ::poll(&pfd, 1, 0);
   } while (prc < 0 && errno == EINTR);
-  if (prc < 0) {
+  if (prc < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("poll failed while checking client socket", err);
     return false;
@@ -190,17 +193,18 @@ static auto socket_alive_(int fd) noexcept -> bool {
 #ifdef POLLRDHUP
                      | POLLRDHUP
 #endif
-                     )) {
+                     )) [[unlikely]] {
     return false;
   }
-  if ((pfd.revents & POLLIN) != 0) {
+  if ((pfd.revents & POLLIN) != 0) [[unlikely]] {
     uint8_t tmp{};
     const ssize_t n = ::recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT);
-    if (n == 0) {
+    if (n == 0) [[unlikely]] {
       return false;
     }
     const int err = errno;
-    if (n < 0 && err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
+    if (n < 0 && err != EAGAIN && err != EWOULDBLOCK && err != EINTR)
+        [[unlikely]] {
       log_errno_("recv peek failed while checking client socket", err);
       return false;
     }
@@ -230,7 +234,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
 [[nodiscard]] auto TCPClient::connect(
     std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  if (fd_ >= 0) {
+  if (fd_ >= 0) [[unlikely]] {
     spw_rmap::debug::debug("Already connected");
     return std::unexpected{std::make_error_code(std::errc::already_connected)};
   }
@@ -242,8 +246,8 @@ static inline auto gai_category() noexcept -> const std::error_category& {
   addrinfo* res = nullptr;
   if (int rc = ::getaddrinfo(std::string(ip_address_).c_str(),
                              std::string(port_).c_str(), &hints, &res);
-      rc != 0) {
-    if (rc == EAI_SYSTEM) {
+      rc != 0) [[unlikely]] {
+    if (rc == EAI_SYSTEM) [[unlikely]] {
       const int err = errno;
       log_errno_("getaddrinfo system error", err);
       return std::unexpected{std::error_code(err, std::system_category())};
@@ -258,7 +262,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
 
   for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
     fd_ = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if (fd_ < 0) {
+    if (fd_ < 0) [[unlikely]] {
       const int err = errno;
       log_errno_("Failed to create client socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
@@ -269,7 +273,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
     last = internal::set_sockopts(fd_).and_then([this, timeout, ai]() -> auto {
       return connect_with_timeout_(fd_, ai->ai_addr, ai->ai_addrlen, timeout);
     });
-    if (!last.has_value()) {
+    if (!last.has_value()) [[unlikely]] {
       close_retry_(fd_);
       fd_ = -1;
       continue;
@@ -278,7 +282,7 @@ static inline auto gai_category() noexcept -> const std::error_category& {
   }
 
   ::freeaddrinfo(res);
-  if (fd_ < 0) {
+  if (fd_ < 0) [[unlikely]] {
     fd_ = -1;
   }
   return last;
@@ -286,10 +290,10 @@ static inline auto gai_category() noexcept -> const std::error_category& {
 
 auto TCPClient::ensureConnect(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  if (fd_ >= 0 && socket_alive_(fd_)) {
+  if (fd_ >= 0 && socket_alive_(fd_)) [[likely]] {
     return {};
   }
-  if (fd_ >= 0) {
+  if (fd_ >= 0) [[unlikely]] {
     spw_rmap::debug::debug("Existing connection unhealthy, reconnecting");
     disconnect();
   }
@@ -303,7 +307,7 @@ auto TCPClient::disconnect() noexcept -> void {
 
 auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  if (timeout < std::chrono::microseconds::zero()) {
+  if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
@@ -315,7 +319,8 @@ auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
   tv.tv_sec = tv_sec;
   tv.tv_usec = tv_usec;
 
-  if (::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0) {
+  if (::setsockopt(fd_, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set send timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -325,7 +330,7 @@ auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  if (timeout < std::chrono::microseconds::zero()) {
+  if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
@@ -335,7 +340,8 @@ auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
   timeval tv{};
   tv.tv_sec = tv_sec;
   tv.tv_usec = tv_usec;
-  if (::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0) {
+  if (::setsockopt(fd_, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) != 0)
+      [[unlikely]] {
     const int err = errno;
     log_errno_("Failed to set receive timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
@@ -345,7 +351,7 @@ auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
     -> std::expected<void, std::error_code> {
-  if (fd_ < 0) {
+  if (fd_ < 0) [[unlikely]] {
     spw_rmap::debug::debug("Not connected");
     return std::unexpected{std::make_error_code(std::errc::not_connected)};
   }
@@ -357,20 +363,20 @@ auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
     constexpr int kFlags = 0;
 #endif
     const ssize_t n = ::send(fd_, data.data(), data.size(), kFlags);
-    if (n < 0) {
+    if (n < 0) [[unlikely]] {
       const int err = errno;
-      if (err == EINTR) {
+      if (err == EINTR) [[unlikely]] {
         continue;
       }
-      if (err == EAGAIN || err == EWOULDBLOCK) {
+      if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::debug("Send would block, timing out");
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       log_errno_("Send failed", err);
       return std::unexpected{std::error_code(err, std::system_category())};
     }
-    if (n == 0) {
-      if (retried_zero) {
+    if (n == 0) [[unlikely]] {
+      if (retried_zero) [[unlikely]] {
         spw_rmap::debug::debug("Send returned zero twice, treating as error");
         return std::unexpected{std::make_error_code(std::errc::io_error)};
       }
@@ -380,23 +386,23 @@ auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
         prc = ::poll(&pfd, 1, 10);
       } while (prc < 0 && errno == EINTR);
 
-      if (prc == 0) {
+      if (prc == 0) [[unlikely]] {
         spw_rmap::debug::debug("Poll timed out after send returned zero");
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
-      if (prc < 0) {
+      if (prc < 0) [[unlikely]] {
         const int poll_err = errno;
         log_errno_("Poll failed after send returned zero", poll_err);
         return std::unexpected{
             std::error_code(poll_err, std::system_category())};
       }
-      if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) [[unlikely]] {
         spw_rmap::debug::debug(
             "Socket error after send returned zero, treating as closed");
         return std::unexpected{
             std::make_error_code(std::errc::connection_aborted)};
       }
-      if ((pfd.revents & POLLOUT) == 0) {
+      if ((pfd.revents & POLLOUT) == 0) [[unlikely]] {
         spw_rmap::debug::debug(
             "Socket not writable after send returned zero, treating as error");
         return std::unexpected{std::make_error_code(std::errc::io_error)};
@@ -411,23 +417,23 @@ auto TCPClient::sendAll(std::span<const uint8_t> data) noexcept
 
 auto TCPClient::recvSome(std::span<uint8_t> buf) noexcept
     -> std::expected<size_t, std::error_code> {
-  if (buf.empty()) {
+  if (buf.empty()) [[unlikely]] {
     return 0U;  // Nothing to receive
   }
   for (;;) {
     const ssize_t n = ::recv(fd_, buf.data(), buf.size(), 0);
-    if (n < 0) {
+    if (n < 0) [[unlikely]] {
       const int err = errno;
-      if (err == EINTR) {
+      if (err == EINTR) [[unlikely]] {
         continue;
       }
-      if (err == EAGAIN || err == EWOULDBLOCK) {
+      if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::debug("Receive would block, timing out");
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       log_errno_("Receive failed", err);
       return std::unexpected{std::error_code(err, std::system_category())};
-    } else if (n == 0) {
+    } else if (n == 0) [[unlikely]] {
       spw_rmap::debug::debug("Connection closed by peer");
       return std::unexpected{std::make_error_code(std::errc::io_error)};
     }
@@ -436,12 +442,12 @@ auto TCPClient::recvSome(std::span<uint8_t> buf) noexcept
 }
 
 auto TCPClient::shutdown() noexcept -> std::expected<void, std::error_code> {
-  if (fd_ < 0) {
+  if (fd_ < 0) [[unlikely]] {
     spw_rmap::debug::debug("Not connected");
     return std::unexpected(
         std::make_error_code(std::errc::bad_file_descriptor));
   }
-  if (::shutdown(fd_, SHUT_RDWR) < 0) {
+  if (::shutdown(fd_, SHUT_RDWR) < 0) [[unlikely]] {
     const int err = errno;
     log_errno_("Shutdown failed", err);
     return std::unexpected(std::error_code(err, std::generic_category()));

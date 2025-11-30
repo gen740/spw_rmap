@@ -68,7 +68,7 @@ class TransactionDatabase {
           timed_out =
               timeout_.count() > 0 && (now - entry.last_used > timeout_);
         }
-        if (entry.available || timed_out) {
+        if (entry.available || timed_out) [[likely]] {
           if (!entry.available && timed_out) {
             spw_rmap::debug::debug(
                 "TransactionDatabase::acquire: Reusing timed-out transaction "
@@ -130,7 +130,7 @@ class TransactionDatabase {
   auto release(uint16_t transaction_id) noexcept -> void {
     std::lock_guard<std::mutex> lock(mutex_);
     auto* entry = getEntry_(transaction_id);
-    if (entry != nullptr) {
+    if (entry != nullptr) [[likely]] {
       return entry->clear();
     }
     spw_rmap::debug::debug(
