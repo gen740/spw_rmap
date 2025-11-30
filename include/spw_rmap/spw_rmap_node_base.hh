@@ -22,6 +22,7 @@ class SpwRmapNodeBase {
   bool verify_mode_{true};
   TransactionDatabase transaction_id_database_;
   std::chrono::milliseconds transaction_id_timeout_{std::chrono::seconds(1)};
+  uint8_t initiator_logical_address_{0xFE};
 
  protected:
   explicit SpwRmapNodeBase(uint16_t transaction_id_min,
@@ -168,12 +169,22 @@ class SpwRmapNodeBase {
     transaction_id_database_.setTimeout(timeout);
   }
 
-  auto cancelTransaction(uint16_t transaction_id) noexcept -> void {
+  virtual auto cancelTransaction(uint16_t transaction_id) noexcept -> void {
     transaction_id_database_.release(transaction_id);
   }
 
-  auto setVerifyMode(bool verify_mode) noexcept -> void {
+  virtual auto setVerifyMode(bool verify_mode) noexcept -> void {
     verify_mode_ = verify_mode;
+  }
+
+  [[nodiscard]] virtual auto getInitiatorLogicalAddress() const noexcept
+      -> uint8_t {
+    return initiator_logical_address_;
+  }
+
+  virtual auto setInitiatorLogicalAddress(uint8_t logical_address) noexcept
+      -> void {
+    initiator_logical_address_ = logical_address;
   }
 };
 

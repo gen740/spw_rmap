@@ -7,14 +7,10 @@
 namespace spw_rmap {
 
 enum class RMAPParseStatus {
-  Success = 0,
-  InvalidPacket = 2,
-  HeaderCRCError = 3,
-  DataCRCError = 4,
-  IncompletePacket = 5,
-  NotReplyPacket = 6,
-  PacketStatusError = 7,
-  UnknownProtocolIdentifier = 8,
+  HeaderCRCError = 0,
+  DataCRCError = 1,
+  IncompletePacket = 2,
+  UnknownProtocolIdentifier = 4,
 };
 
 class RMAPStatusCodeCategory final : public std::error_category {
@@ -25,20 +21,12 @@ class RMAPStatusCodeCategory final : public std::error_category {
 
   [[nodiscard]] auto message(int ev) const -> std::string override {
     switch (static_cast<RMAPParseStatus>(ev)) {
-      case RMAPParseStatus::Success:
-        return "Success";
-      case RMAPParseStatus::InvalidPacket:
-        return "Invalid packet";
       case RMAPParseStatus::HeaderCRCError:
         return "Header CRC error";
       case RMAPParseStatus::DataCRCError:
         return "Data CRC error";
       case RMAPParseStatus::IncompletePacket:
         return "Incomplete packet";
-      case RMAPParseStatus::NotReplyPacket:
-        return "Not a reply packet";
-      case RMAPParseStatus::PacketStatusError:
-        return "Packet status error";
       case RMAPParseStatus::UnknownProtocolIdentifier:
         return "Unknown protocol identifier";
       default:

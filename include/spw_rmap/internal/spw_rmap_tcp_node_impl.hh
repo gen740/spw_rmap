@@ -72,7 +72,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   std::vector<uint8_t> recv_buf_ = {};
   std::vector<uint8_t> send_buf_ = {};
-  uint8_t initiator_logical_address_ = 0xFE;
   BufferPolicy buffer_policy_ = BufferPolicy::AutoResize;
   std::chrono::microseconds send_timeout_{std::chrono::milliseconds{500}};
 
@@ -103,9 +102,11 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         buffer_policy_(config.buffer_policy),
         send_timeout_(config.send_timeout) {}
 
- public:
-  auto setInitiatorLogicalAddress(uint8_t address) -> void {
-    initiator_logical_address_ = address;
+  auto ensureTCPConnection() noexcept -> std::expected<void, std::error_code> {
+    return tcp_backend_->ensureConnect().and_then(
+        [this]() -> std::expected<void, std::error_code> {
+          return tcp_backend_->setSendTimeout(send_timeout_);
+        });
   }
 
  protected:
@@ -142,21 +143,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return tcp_backend_->setSendTimeout(timeout);
   }
 
-  auto ensureConnectionReady_() noexcept
-      -> std::expected<void, std::error_code> {
-    return tcp_backend_->ensureConnect().and_then(
-        [this]() -> std::expected<void, std::error_code> {
-          return tcp_backend_->setSendTimeout(send_timeout_);
-        });
-  }
-
   auto connectLoopUntilHealthy_() noexcept
       -> std::expected<void, std::error_code> {
     std::error_code last_error = std::make_error_code(std::errc::not_connected);
     constexpr int kMaxAttempts = 3;
     for (int attempt = 0; attempt < kMaxAttempts && running_.load();
          ++attempt) {
-      auto res = ensureConnectionReady_();
+      auto res = ensureTCPConnection();
       if (res.has_value()) [[likely]] {
         return res;
       }
@@ -377,7 +370,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         .targetSpaceWireAddress = target_node->getTargetSpaceWireAddress(),
         .replyAddress = target_node->getReplyAddress(),
         .targetLogicalAddress = target_node->getTargetLogicalAddress(),
-        .initiatorLogicalAddress = initiator_logical_address_,
+        .initiatorLogicalAddress = getInitiatorLogicalAddress(),
         .transactionID = transaction_id,
         .extendedAddress = 0x00,
         .address = memory_address,
@@ -425,7 +418,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         .targetSpaceWireAddress = target_node->getTargetSpaceWireAddress(),
         .replyAddress = target_node->getReplyAddress(),
         .targetLogicalAddress = target_node->getTargetLogicalAddress(),
-        .initiatorLogicalAddress = initiator_logical_address_,
+        .initiatorLogicalAddress = getInitiatorLogicalAddress(),
         .transactionID = transaction_id,
         .extendedAddress = 0x00,
         .address = memory_address,
@@ -603,7 +596,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         continue;
       }
       spw_rmap::debug::debug("Error in poll(): ", res.error().message());
-      auto ensure_res = ensureConnectionReady_();
+      auto ensure_res = ensureTCPConnection();
       if (ensure_res.has_value()) [[likely]] {
         continue;
       }
@@ -658,7 +651,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       -> std::expected<void, std::error_code> override {
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
-      return ensureConnectionReady_()
+      return ensureTCPConnection()
           .and_then([this, timeout]() -> std::expected<void, std::error_code> {
             return tcp_backend_->setReceiveTimeout(timeout);
           })
@@ -683,8 +676,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               spw_rmap::debug::debug(
                   "Received packet with unexpected Transaction ID: ",
                   packet.transactionID);
-              return std::unexpected{
-                  make_error_code(RMAPParseStatus::NotReplyPacket)};
+              return std::unexpected{make_error_code(std::errc::bad_message)};
             }
             if (packet.type == PacketType::WriteReply) [[likely]] {
               cancelTransaction(static_cast<uint16_t>(transaction_id_memo));
@@ -794,7 +786,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       -> std::expected<void, std::error_code> override {
     if (auto_polling_mode_) {
       int32_t transaction_id_memo = -1;
-      return ensureConnectionReady_()
+      return ensureTCPConnection()
           .and_then([this, timeout]() -> std::expected<void, std::error_code> {
             return tcp_backend_->setReceiveTimeout(timeout);
           })

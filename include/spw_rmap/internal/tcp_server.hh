@@ -10,7 +10,6 @@
 #include <string>
 #include <system_error>
 #include <utility>
-#include <variant>
 
 namespace spw_rmap::internal {
 

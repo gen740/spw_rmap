@@ -1,11 +1,11 @@
-#include "spw_rmap/transaction_database.hh"
+#include <gtest/gtest.h>
 
 #include <atomic>
 #include <chrono>
 #include <expected>
 #include <thread>
 
-#include <gtest/gtest.h>
+#include "spw_rmap/transaction_database.hh"
 
 namespace {
 
@@ -33,13 +33,13 @@ TEST(TransactionDatabaseTest, CallbackReceivesPacket) {
   std::atomic<bool> called{false};
 
   uint16_t expected_id = 0;
-  auto id = db.acquire([&called, &expected_id](
-                           std::expected<spw_rmap::Packet, std::error_code>
-                               result) mutable {
-    ASSERT_TRUE(result.has_value());
-    called = true;
-    EXPECT_EQ(result->transactionID, expected_id);
-  });
+  auto id = db.acquire(
+      [&called, &expected_id](
+          std::expected<spw_rmap::Packet, std::error_code> result) mutable {
+        ASSERT_TRUE(result.has_value());
+        called = true;
+        EXPECT_EQ(result->transactionID, expected_id);
+      });
   ASSERT_TRUE(id.has_value());
   expected_id = *id;
   auto expected = *id;
@@ -54,12 +54,12 @@ TEST(TransactionDatabaseTest, TimeoutInvokesCallbackWithError) {
   db.setTimeout(std::chrono::milliseconds(1));
 
   std::atomic<bool> timed_out{false};
-  auto id = db.acquire([&timed_out](std::expected<spw_rmap::Packet,
-                                             std::error_code> result) {
-    ASSERT_FALSE(result.has_value());
-    timed_out = true;
-    EXPECT_EQ(result.error(), std::make_error_code(std::errc::timed_out));
-  });
+  auto id = db.acquire(
+      [&timed_out](std::expected<spw_rmap::Packet, std::error_code> result) {
+        ASSERT_FALSE(result.has_value());
+        timed_out = true;
+        EXPECT_EQ(result.error(), std::make_error_code(std::errc::timed_out));
+      });
   ASSERT_TRUE(id.has_value());
 
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
@@ -70,7 +70,8 @@ TEST(TransactionDatabaseTest, TimeoutInvokesCallbackWithError) {
     ASSERT_TRUE(next.has_value());
     later_ids.push_back(*next);
   }
-  EXPECT_NE(std::find(later_ids.begin(), later_ids.end(), *id), later_ids.end());
+  EXPECT_NE(std::find(later_ids.begin(), later_ids.end(), *id),
+            later_ids.end());
   EXPECT_TRUE(timed_out.load());
 }
 
