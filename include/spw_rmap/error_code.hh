@@ -47,10 +47,7 @@ class StatusCodeCategory final : public std::error_category {
   }
 };
 
-inline auto status_code_category() noexcept -> const std::error_category& {
-  static StatusCodeCategory instance;
-  return instance;
-}
+auto status_code_category() noexcept -> const std::error_category&;
 
 inline auto make_error_code(ParseStatus e) noexcept -> std::error_code {
   return {static_cast<int>(e), status_code_category()};
