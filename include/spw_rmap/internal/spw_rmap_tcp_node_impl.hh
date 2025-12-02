@@ -557,6 +557,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             }
             case PacketType::Read: {
               if (on_read_callback_) [[likely]] {
+#ifdef __EXCEPTIONS
                 try {
                   return sendReadReplyPacket_(packet,
                                               on_read_callback_(packet));
@@ -566,11 +567,15 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   return std::unexpected{
                       std::make_error_code(std::errc::operation_canceled)};
                 }
+#else
+                return sendReadReplyPacket_(packet, on_read_callback_(packet));
+#endif
               }
               return {};
             }
             case PacketType::Write: {
               if (on_write_callback_) [[likely]] {
+#ifdef __EXCEPTIONS
                 try {
                   on_write_callback_(packet);
                   return sendWriteReplyPacket_(packet);
@@ -580,6 +585,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   return std::unexpected{
                       std::make_error_code(std::errc::operation_canceled)};
                 }
+#else
+                on_write_callback_(packet);
+                return sendWriteReplyPacket_(packet);
+#endif
               }
               return {};
             }
@@ -673,8 +682,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             return sendWritePacket_(target_node, transaction_id, memory_address,
                                     data);
           })
-          .and_then([this, &target_node, &memory_address,
-                     &data]() -> std::expected<Packet, std::error_code> {
+          .and_then([this]() -> std::expected<Packet, std::error_code> {
             return recvAndParseOnePacket_();
           })
           .and_then([this, &transaction_id_memo](
@@ -713,8 +721,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                           {
                             std::unique_lock<std::mutex> lock(write_mtx);
                             write_res = res.transform(
-                                [&write_mtx, &write_completed,
-                                 &write_cv](const Packet&) noexcept -> void {});
+                                [](const Packet&) noexcept -> void {});
                             write_completed = true;
                           }
                           write_cv.notify_one();
@@ -724,7 +731,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                         -> std::expected<void, std::error_code> {
             std::unique_lock<std::mutex> lock(write_mtx);
             if (write_cv.wait_for(lock, clampTransactionTimeout(timeout),
-                                  [&write_completed, this] -> auto {
+                                  [&write_completed] -> auto {
                                     return write_completed;
                                   })) [[likely]] {
               return write_res;
@@ -751,9 +758,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
     }
-    return acquireTransaction([this, on_complete = std::move(on_complete)](
+    return acquireTransaction([on_complete = std::move(on_complete)](
                                   std::expected<Packet, std::error_code>
                                       result) mutable noexcept -> void {
+#ifdef __EXCEPTIONS
              try {
                on_complete(std::move(result));
              } catch (const std::exception& e) {
@@ -763,6 +771,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                spw_rmap::debug::debug(
                    "Unknown exception in writeAsync callback");
              }
+#else
+             on_complete(std::move(result));
+#endif
            })
         .and_then([this, target_node = std::move(target_node), memory_address,
                    data](uint16_t transaction_id) noexcept
@@ -815,8 +826,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                       return ec;
                     });
           })
-          .and_then([this, &target_node, &memory_address,
-                     &data]() -> std::expected<Packet, std::error_code> {
+          .and_then([this]() -> std::expected<Packet, std::error_code> {
             return recvAndParseOnePacket_();
           })
           .and_then([this, &transaction_id_memo, &data](
@@ -886,7 +896,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                         -> std::expected<void, std::error_code> {
             std::unique_lock<std::mutex> lock(read_mtx);
             if (read_cv.wait_for(lock, clampTransactionTimeout(timeout),
-                                 [&read_completed, this] -> auto {
+                                 [&read_completed] -> auto {
                                    return read_completed;
                                  })) [[likely]] {
               return read_res;
@@ -912,9 +922,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
     }
-    return acquireTransaction([this, on_complete = std::move(on_complete)](
+    return acquireTransaction([on_complete = std::move(on_complete)](
                                   std::expected<Packet, std::error_code>
                                       result) mutable noexcept -> void {
+#ifdef __EXCEPTIONS
              try {
                on_complete(std::move(result));
              } catch (const std::exception& e) {
@@ -924,6 +935,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                spw_rmap::debug::debug(
                    "Unknown exception in readAsync callback");
              }
+#else
+             on_complete(std::move(result));
+#endif
            })
         .and_then([this, target_node = std::move(target_node), memory_address,
                    data_length](uint16_t transaction_id) noexcept

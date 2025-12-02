@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <expected>
@@ -35,14 +36,14 @@ TEST(TransactionDatabaseTest, CallbackReceivesPacket) {
   uint16_t expected_id = 0;
   auto id = db.acquire(
       [&called, &expected_id](
-          std::expected<spw_rmap::Packet, std::error_code> result) mutable {
+          std::expected<spw_rmap::Packet, std::error_code> result) mutable
+          -> void {
         ASSERT_TRUE(result.has_value());
         called = true;
         EXPECT_EQ(result->transactionID, expected_id);
       });
   ASSERT_TRUE(id.has_value());
   expected_id = *id;
-  auto expected = *id;
   spw_rmap::Packet packet{};
   packet.transactionID = *id;
   EXPECT_TRUE(db.invokeReplyCallback(*id, packet));
@@ -55,7 +56,8 @@ TEST(TransactionDatabaseTest, TimeoutInvokesCallbackWithError) {
 
   std::atomic<bool> timed_out{false};
   auto id = db.acquire(
-      [&timed_out](std::expected<spw_rmap::Packet, std::error_code> result) {
+      [&timed_out](
+          std::expected<spw_rmap::Packet, std::error_code> result) -> void {
         ASSERT_FALSE(result.has_value());
         timed_out = true;
         EXPECT_EQ(result.error(), std::make_error_code(std::errc::timed_out));
@@ -70,8 +72,7 @@ TEST(TransactionDatabaseTest, TimeoutInvokesCallbackWithError) {
     ASSERT_TRUE(next.has_value());
     later_ids.push_back(*next);
   }
-  EXPECT_NE(std::find(later_ids.begin(), later_ids.end(), *id),
-            later_ids.end());
+  EXPECT_NE(std::ranges::find(later_ids, *id), later_ids.end());
   EXPECT_TRUE(timed_out.load());
 }
 
