@@ -106,6 +106,7 @@
                       -DCMAKE_BUILD_TYPE=Debug \
                       -DSPWRMAP_BUILD_TESTS=ON \
                       -DSPWRMAP_BUILD_EXAMPLES=ON \
+                      -DSPWRMAP_BUILD_APPS=ON \
                       -DSPWRMAP_BUILD_PYTHON_BINDINGS=ON
                   fi
                   nix develop --command cmake --build build

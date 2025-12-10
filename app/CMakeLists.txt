@@ -4,6 +4,7 @@ target_compile_features(spwrmap_cli PRIVATE cxx_std_23)
 set_target_properties(spwrmap_cli PROPERTIES OUTPUT_NAME spwrmap)
 
 add_executable(spwrmap_speedtest_cli spwrmap_speedtest.cc)
+target_compile_options(spwrmap_speedtest_cli PRIVATE $<$<CONFIG:Release>:-O3>)
 target_link_libraries(spwrmap_speedtest_cli PRIVATE spw_rmap)
 target_compile_features(spwrmap_speedtest_cli PRIVATE cxx_std_23)
 set_target_properties(spwrmap_speedtest_cli PROPERTIES
