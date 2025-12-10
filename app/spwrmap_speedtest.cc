@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -39,6 +40,7 @@ struct Options {
   std::optional<std::size_t> ntimes;
   std::optional<std::size_t> nbytes;
   std::optional<uint32_t> start_address;
+  std::optional<std::string> out_path;
 };
 
 void printUsage(const char* program) {
@@ -162,6 +164,12 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
       } else {
         return std::nullopt;
       }
+    } else if (name == "out") {
+      if (auto v = takeValue(name)) {
+        opts.out_path = std::move(*v);
+      } else {
+        return std::nullopt;
+      }
     } else if (name == "help") {
       printUsage(argv[0]);
       std::exit(0);
@@ -232,12 +240,12 @@ auto computeQuartiles(std::vector<double> xs)
     return {0.0, 0.0, 0.0, 0.0, 0.0};
   }
   std::ranges::sort(xs);
-  const std::size_t n = xs.size();
+  const long n = static_cast<long>(xs.size());
   const double min_v = xs.front();
   const double max_v = xs.back();
   const double median = medianSorted(xs);
 
-  const std::size_t mid = n / 2;
+  const long mid = n / 2;
   std::vector<double> lower(xs.begin(), xs.begin() + mid);
   std::vector<double> upper;
   if (n % 2 == 0) {
@@ -252,7 +260,9 @@ auto computeQuartiles(std::vector<double> xs)
 
 void updateProgress(std::size_t current, std::size_t total) {
   static constexpr std::size_t kBarWidth = 40;
-  double ratio = total == 0 ? 0.0 : static_cast<double>(current) / total;
+  double ratio =
+      total == 0 ? 0.0
+                 : static_cast<double>(current) / static_cast<double>(total);
   ratio = std::clamp(ratio, 0.0, 1.0);
   auto filled = static_cast<std::size_t>(ratio * kBarWidth);
   std::cerr << '\r' << "[";
@@ -275,6 +285,15 @@ auto main(int argc, char** argv) -> int {
     return 1;
   }
   auto opts = std::move(*options);
+  std::ofstream out_file;
+  if (opts.out_path) {
+    out_file.open(*opts.out_path, std::ios::out | std::ios::trunc);
+    if (!out_file.is_open()) {
+      std::cerr << "Failed to open output file: " << *opts.out_path << "\n";
+      return 1;
+    }
+    out_file << "index,elapsed_ns\n";
+  }
 
   const std::size_t ntimes = *opts.ntimes;
   const std::size_t total_bytes = *opts.nbytes;
@@ -347,8 +366,7 @@ auto main(int argc, char** argv) -> int {
       return 1;
     }
 
-    if (!std::equal(read_buffer.begin(), read_buffer.end(), pattern.begin(),
-                    pattern.end())) {
+    if (!std::ranges::equal(read_buffer, pattern)) {
       std::cerr << "Data mismatch detected during iteration " << (iter + 1)
                 << "\n";
       if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
@@ -361,6 +379,11 @@ auto main(int argc, char** argv) -> int {
     const auto elapsed =
         std::chrono::duration<double, std::nano>(end_time - start_time).count();
     latencies_us.push_back(elapsed);
+    if (out_file.is_open()) {
+      // Do not use scientific notation for CSV output.
+      out_file << (iter + 1) << ',' << std::fixed << std::setprecision(0)
+               << elapsed << '\n';
+    }
     updateProgress(iter + 1, ntimes);
   }
 
