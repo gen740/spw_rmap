@@ -1,9 +1,11 @@
 #include <algorithm>
+#include <cerrno>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -15,9 +17,14 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
+
+#if defined(__linux__) || defined(__APPLE__)
+#include <sys/resource.h>
+#endif
 
 #include "spw_rmap/spw_rmap_tcp_node.hh"
 #include "spw_rmap/target_node.hh"
@@ -276,6 +283,53 @@ auto toMicroseconds(double value) -> long long {
   return static_cast<long long>(std::llround(value));
 }
 
+void trySetHighestPriority() {
+#if defined(__linux__)
+  {
+    sched_param sp{};
+    sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
+
+    int ret = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
+    if (ret != 0) {
+      std::cerr << "Warning: failed to set SCHED_FIFO: " << std::strerror(ret)
+                << '\n';
+    } else {
+      std::cerr << "SCHED_FIFO with max priority is set.\n";
+    }
+  }
+
+  {
+    cpu_set_t set;
+    CPU_ZERO(&set);
+    CPU_SET(0, &set);  // 必要に応じてコア番号は変更する
+
+    int ret = pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
+    if (ret != 0) {
+      std::cerr << "Warning: failed to set CPU affinity: " << std::strerror(ret)
+                << '\n';
+    } else {
+      std::cerr << "Pinned current thread to CPU 0.\n";
+    }
+  }
+
+  errno = 0;
+  if (setpriority(PRIO_PROCESS, 0, -20) != 0) {
+    std::cerr << "Warning: failed to raise CPU priority (nice): "
+              << std::strerror(errno) << '\n';
+  }
+
+#elif defined(__APPLE__)
+  errno = 0;
+  if (setpriority(PRIO_PROCESS, 0, -20) != 0) {
+    std::cerr << "Warning: failed to raise CPU priority (nice): "
+              << std::strerror(errno) << '\n';
+  } else {
+    std::cerr << "Nice priority raised to -20.\n";
+  }
+#else
+  std::cerr << "Info: priority tuning is not supported on this platform.\n";
+#endif
+}
 }  // namespace
 
 auto main(int argc, char** argv) -> int {
@@ -285,6 +339,9 @@ auto main(int argc, char** argv) -> int {
     return 1;
   }
   auto opts = std::move(*options);
+
+  trySetHighestPriority();
+
   std::ofstream out_file;
   if (opts.out_path) {
     out_file.open(*opts.out_path, std::ios::out | std::ios::trunc);
@@ -351,6 +408,21 @@ auto main(int argc, char** argv) -> int {
   std::vector<uint8_t> read_buffer(total_bytes);
 
   updateProgress(0, ntimes);
+
+  for (std::size_t iter = 0; iter < 10000; ++iter) {
+    std::vector<uint8_t> warmup_buffer{};
+    warmup_buffer.resize(4);
+    auto res = client.read(target, base_address, warmup_buffer);
+    if (!res.has_value()) {
+      std::cerr << "Warm-up read failed during iteration " << (iter + 1) << ": "
+                << res.error().message() << "\n";
+      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+        std::cerr << "Shutdown error: " << shutdown_res.error().message()
+                  << "\n";
+      }
+      return 1;
+    }
+  }
 
   for (std::size_t iter = 0; iter < ntimes; ++iter) {
     const auto start_time = Clock::now();
