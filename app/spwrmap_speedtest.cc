@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -265,20 +266,6 @@ auto computeQuartiles(std::vector<double> xs)
   return {min_v, q1, median, q3, max_v};
 }
 
-void updateProgress(std::size_t current, std::size_t total) {
-  static constexpr std::size_t kBarWidth = 40;
-  double ratio =
-      total == 0 ? 0.0
-                 : static_cast<double>(current) / static_cast<double>(total);
-  ratio = std::clamp(ratio, 0.0, 1.0);
-  auto filled = static_cast<std::size_t>(ratio * kBarWidth);
-  std::cerr << '\r' << "[";
-  for (std::size_t i = 0; i < kBarWidth; ++i) {
-    std::cerr << (i < filled ? '#' : '.');
-  }
-  std::cerr << "] " << current << "/" << total << std::flush;
-}
-
 auto toMicroseconds(double value) -> long long {
   return static_cast<long long>(std::llround(value));
 }
@@ -403,11 +390,9 @@ auto main(int argc, char** argv) -> int {
     }
   }
 
-  std::vector<double> latencies_us;
-  latencies_us.reserve(ntimes);
+  std::vector<double> latencies_ns;
+  latencies_ns.reserve(ntimes);
   std::vector<uint8_t> read_buffer(total_bytes);
-
-  updateProgress(0, ntimes);
 
   for (std::size_t iter = 0; iter < 10000; ++iter) {
     std::vector<uint8_t> warmup_buffer{};
@@ -450,20 +435,19 @@ auto main(int argc, char** argv) -> int {
 
     const auto elapsed =
         std::chrono::duration<double, std::nano>(end_time - start_time).count();
-    latencies_us.push_back(elapsed);
-    if (out_file.is_open()) {
-      // Do not use scientific notation for CSV output.
-      out_file << (iter + 1) << ',' << std::fixed << std::setprecision(0)
-               << elapsed << '\n';
-    }
-    updateProgress(iter + 1, ntimes);
+    latencies_ns.push_back(elapsed);
   }
 
-  std::cerr << '\n';
+  if (out_file.is_open()) {
+    out_file << "index,elapsed_ns\n" << std::fixed << std::setprecision(0);
+    for (std::size_t i = 0; i < latencies_ns.size(); ++i) {
+      out_file << (i + 1) << ',' << latencies_ns[i] << '\n';
+    }
+  }
 
-  auto mean = computeMean(latencies_us);
-  auto stddev = computeStd(latencies_us, mean);
-  auto [min_v, q1, median, q3, max_v] = computeQuartiles(latencies_us);
+  auto mean = computeMean(latencies_ns);
+  auto stddev = computeStd(latencies_ns, mean);
+  auto [min_v, q1, median, q3, max_v] = computeQuartiles(latencies_ns);
 
   std::cout << "mean=" << toMicroseconds(mean)
             << " std=" << toMicroseconds(stddev)
@@ -471,6 +455,9 @@ auto main(int argc, char** argv) -> int {
             << " median=" << toMicroseconds(median)
             << " q3=" << toMicroseconds(q3) << " max=" << toMicroseconds(max_v)
             << '\n';
+
+  std::cerr << "Test completed successfully with " << ntimes
+            << " iterations.\n";
 
   auto shutdown_res = client.shutdown();
   if (!shutdown_res.has_value()) {
