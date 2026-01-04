@@ -24,7 +24,7 @@
           (python-final: python-prev: {
             pyspw_rmap = python-final.buildPythonPackage {
               pname = "pyspw_rmap";
-              version = "0.1.3";
+              version = "0.2.0";
               format = "pyproject";
               src = ./.;
               nativeBuildInputs =
@@ -73,7 +73,7 @@
           packages = {
             spw_rmap = pkgs.stdenv.mkDerivation {
               pname = "spw_rmap";
-              version = "0.1.3";
+              version = "0.2.0";
               src = ./.;
               nativeBuildInputs = [
                 pkgs.cmake
