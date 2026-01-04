@@ -394,7 +394,7 @@ auto main(int argc, char** argv) -> int {
   latencies_ns.reserve(ntimes);
   std::vector<uint8_t> read_buffer(total_bytes);
 
-  for (std::size_t iter = 0; iter < 10000; ++iter) {
+  for (std::size_t iter = 0; iter < 20000; ++iter) {
     std::vector<uint8_t> warmup_buffer{};
     warmup_buffer.resize(4);
     auto res = client.read(target, base_address, warmup_buffer);
