@@ -53,6 +53,14 @@ jobs:
       TEST_PYPI_VERSION_SUFFIX: ${{ github.run_number }}.${{ github.run_attempt }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up QEMU (for aarch64)
+        if: matrix.cibw_archs == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Set up Docker Buildx
+        if: matrix.cibw_archs == 'aarch64'
+        uses: docker/setup-buildx-action@v3
       - name: Set unique TestPyPI version
         run: |
           python3 - <<'PY'
@@ -158,9 +166,17 @@ jobs:
             cibw_archs: arm64
             build_sdist: false
     env:
-      cmake_args: -dspwrmap_build_tests=off
+      CMAKE_ARGS: -DSPWRMAP_BUILD_TESTS=OFF
     steps:
       - uses: actions/checkout@v4
+      - name: Set up QEMU (for aarch64)
+        if: matrix.cibw_archs == 'aarch64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - name: Set up Docker Buildx
+        if: matrix.cibw_archs == 'aarch64'
+        uses: docker/setup-buildx-action@v3
       - id: setup-python
         uses: actions/setup-python@v5
         with:
