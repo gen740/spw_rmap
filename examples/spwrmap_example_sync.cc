@@ -1,7 +1,6 @@
 #include <array>
 #include <chrono>
 #include <iostream>
-#include <memory>
 #include <vector>
 
 #include "spw_rmap/spw_rmap_tcp_node.hh"
@@ -20,8 +19,10 @@ auto main() -> int {
   }
   std::cout << "Connected to RMAP bridge (sync example)\n";
 
-  auto target = std::make_shared<spw_rmap::TargetNodeDynamic>(
-      0x32, std::vector<uint8_t>{0x06, 0x02}, std::vector<uint8_t>{0x01, 0x03});
+  auto target = spw_rmap::TargetNode(0x32);
+  target.setTargetAddress(0x06d, 0x02);
+  target.setReplyAddress(0x01, 0x03);
+  // target.se
 
   const uint32_t demo_address = 0x44A20000;
   const std::array<uint8_t, 4> payload{0x01, 0x02, 0x03, 0x04};

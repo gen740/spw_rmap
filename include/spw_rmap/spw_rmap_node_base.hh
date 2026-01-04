@@ -7,7 +7,6 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
-#include <memory>
 #include <span>
 #include <system_error>
 #include <utility>
@@ -88,8 +87,7 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Data to write.
    */
-  virtual auto write(std::shared_ptr<TargetNodeBase> target_node,
-                     uint32_t memory_address,
+  virtual auto write(const TargetNode& target_node, uint32_t memory_address,
                      const std::span<const uint8_t> data,
                      std::chrono::milliseconds timeout =
                          std::chrono::milliseconds{100}) noexcept
@@ -105,8 +103,8 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Reference to a span where the read data will be stored.
    */
-  virtual auto read(std::shared_ptr<TargetNodeBase> target_node,
-                    uint32_t memory_address, const std::span<uint8_t> data,
+  virtual auto read(const TargetNode& target_node, uint32_t memory_address,
+                    const std::span<uint8_t> data,
                     std::chrono::milliseconds timeout =
                         std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> = 0;
@@ -122,7 +120,7 @@ class SpwRmapNodeBase {
    * @param data Data to write.
    */
   virtual auto writeAsync(
-      std::shared_ptr<TargetNodeBase> target_node, uint32_t memory_address,
+      const TargetNode& target_node, uint32_t memory_address,
       const std::span<const uint8_t> data,
       std::function<void(std::expected<Packet, std::error_code>)>
           on_complete) noexcept -> std::expected<uint16_t, std::error_code> = 0;
@@ -138,7 +136,7 @@ class SpwRmapNodeBase {
    * @param data Reference to a span where the read data will be stored.
    */
   virtual auto readAsync(
-      std::shared_ptr<TargetNodeBase> target_node, uint32_t memory_address,
+      const TargetNode& target_node, uint32_t memory_address,
       uint32_t data_length,
       std::function<void(std::expected<Packet, std::error_code>)>
           on_complete) noexcept -> std::expected<uint16_t, std::error_code> = 0;

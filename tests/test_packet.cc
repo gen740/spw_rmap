@@ -75,11 +75,12 @@ TEST(spw_rmap, ReadPacket) {
       reply_address.push_back(random_bus_address());
     }
 
-    TargetNodeDynamic node(random_logical_address(), std::move(target_address),
-                           std::move(reply_address));
+    TargetNode node(random_logical_address());
+    std::ignore = node.setTargetAddress(target_address);
+    std::ignore = node.setReplyAddress(reply_address);
 
     auto c = ReadPacketConfig{
-        .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
+        .targetSpaceWireAddress = node.getTargetAddress(),
         .replyAddress = node.getReplyAddress(),
         .targetLogicalAddress = node.getTargetLogicalAddress(),
         .initiatorLogicalAddress = random_logical_address(),
@@ -127,8 +128,9 @@ TEST(spw_rmap, ReadReplyPacket) {
       reply_address.push_back(random_bus_address());
     }
 
-    TargetNodeDynamic node(random_logical_address(), std::move(target_address),
-                           std::move(reply_address));
+    TargetNode node(random_logical_address());
+    std::ignore = node.setTargetAddress(target_address);
+    std::ignore = node.setReplyAddress(reply_address);
 
     std::vector<uint8_t> data;
 
@@ -177,8 +179,9 @@ TEST(spw_rmap, WritePacket) {
       reply_address.push_back(random_bus_address());
     }
 
-    TargetNodeDynamic node(random_logical_address(), std::move(target_address),
-                           std::move(reply_address));
+    TargetNode node(random_logical_address());
+    std::ignore = node.setTargetAddress(target_address);
+    std::ignore = node.setReplyAddress(reply_address);
 
     std::vector<uint8_t> data;
 
@@ -187,7 +190,7 @@ TEST(spw_rmap, WritePacket) {
     }
 
     auto c = WritePacketConfig{
-        .targetSpaceWireAddress = node.getTargetSpaceWireAddress(),
+        .targetSpaceWireAddress = node.getTargetAddress(),
         .replyAddress = node.getReplyAddress(),
         .targetLogicalAddress = node.getTargetLogicalAddress(),
         .initiatorLogicalAddress = random_logical_address(),
@@ -235,8 +238,9 @@ TEST(spw_rmap, WriteReplyPacket) {
       reply_address.push_back(random_bus_address());
     }
 
-    TargetNodeDynamic node(random_logical_address(), std::move(target_address),
-                           std::move(reply_address));
+    TargetNode node(random_logical_address());
+    std::ignore = node.setTargetAddress(target_address);
+    std::ignore = node.setReplyAddress(reply_address);
 
     auto c = WriteReplyPacketConfig{
         .replyAddress = node.getReplyAddress(),
