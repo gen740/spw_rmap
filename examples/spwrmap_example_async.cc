@@ -1,9 +1,7 @@
 #include <array>
 #include <chrono>
 #include <iostream>
-#include <memory>
 #include <thread>
-#include <vector>
 
 #include "spw_rmap/spw_rmap_tcp_node.hh"
 #include "spw_rmap/target_node.hh"
@@ -20,8 +18,9 @@ auto main() -> int {
   }
   std::cout << "Connected to RMAP bridge (async example)\n";
 
-  auto target = std::make_shared<spw_rmap::TargetNodeDynamic>(
-      0x32, std::vector<uint8_t>{0x06, 0x02}, std::vector<uint8_t>{0x01, 0x03});
+  auto target = spw_rmap::TargetNode(0x32)
+                    .setTargetAddress(0x06, 0x02)
+                    .setReplyAddress(0x01, 0x03);
 
   std::thread loop([&client]() -> void {
     auto res = client.runLoop();

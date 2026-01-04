@@ -1,7 +1,6 @@
 #include <array>
 #include <chrono>
 #include <iostream>
-#include <memory>
 #include <span>
 
 #include "spw_rmap/spw_rmap_tcp_node.hh"
@@ -22,7 +21,9 @@ auto main() -> int {
   if (!res) exit(1);
 
   // ターゲットノードの作成
-  auto target = spw_rmap::makeTargetNode(0x32, {0x06, 0x02}, {0x01, 0x03});
+  auto target = spw_rmap::TargetNode(0x32);
+  target.setTargetAddress(0x06, 0x02);
+  target.setReplyAddress(0x01, 0x03);
   constexpr uint32_t addr = 0x44A20000;
   constexpr std::array<uint8_t, 4> payload{0x01, 0x02, 0x03, 0x04};
 

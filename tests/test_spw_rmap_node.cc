@@ -191,16 +191,11 @@ auto makeNodeConfig() -> spw_rmap::SpwRmapTCPNodeConfig {
   return config;
 }
 
-auto makeTargetNode() -> std::shared_ptr<spw_rmap::TargetNodeBase> {
-  std::vector<uint8_t> target_addr{0x20, 0x30};
-  std::vector<uint8_t> reply_addr{0x10, 0x11};
-  return std::make_shared<spw_rmap::TargetNodeDynamic>(
-      0x34, std::move(target_addr), std::move(reply_addr));
-}
-
 TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
   TestNode node(makeNodeConfig());
-  auto target_node = makeTargetNode();
+  auto target_node = spw_rmap::TargetNode(0x34)
+                         .setTargetAddress(0x20, 0x30)
+                         .setReplyAddress(0x10, 0x11);
 
   std::array<uint8_t, 4> payload{0xAA, 0xBB, 0xCC, 0xDD};
   std::atomic<bool> callback_called{false};
@@ -227,7 +222,9 @@ TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
 
 TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
   TestNode node(makeNodeConfig());
-  auto target_node = makeTargetNode();
+  auto target_node = spw_rmap::TargetNode(0x34)
+                         .setTargetAddress(0x20, 0x30)
+                         .setReplyAddress(0x10, 0x11);
   std::array<uint8_t, 2> payload{0x01, 0x02};
 
   auto timeout_result =

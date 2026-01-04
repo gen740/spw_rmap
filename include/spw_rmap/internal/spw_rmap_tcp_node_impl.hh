@@ -368,15 +368,14 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     send_buf_[11] = static_cast<uint8_t>((total_size >> 0) & 0xFF);
   }
 
-  auto sendReadPacket_(std::shared_ptr<TargetNodeBase> target_node,
-                       uint16_t transaction_id, uint32_t memory_address,
-                       uint32_t data_length) noexcept
+  auto sendReadPacket_(const TargetNode& target_node, uint16_t transaction_id,
+                       uint32_t memory_address, uint32_t data_length) noexcept
       -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto config = ReadPacketConfig{
-        .targetSpaceWireAddress = target_node->getTargetSpaceWireAddress(),
-        .replyAddress = target_node->getReplyAddress(),
-        .targetLogicalAddress = target_node->getTargetLogicalAddress(),
+        .targetSpaceWireAddress = target_node.getTargetAddress(),
+        .replyAddress = target_node.getReplyAddress(),
+        .targetLogicalAddress = target_node.getTargetLogicalAddress(),
         .initiatorLogicalAddress = getInitiatorLogicalAddress(),
         .transactionID = transaction_id,
         .extendedAddress = 0x00,
@@ -416,15 +415,15 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         std::span(send_buf_).first(config.expectedSize() + 12));
   }
 
-  auto sendWritePacket_(std::shared_ptr<TargetNodeBase> target_node,
-                        uint16_t transaction_id, uint32_t memory_address,
+  auto sendWritePacket_(const TargetNode& target_node, uint16_t transaction_id,
+                        uint32_t memory_address,
                         const std::span<const uint8_t> data) noexcept
       -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto config = WritePacketConfig{
-        .targetSpaceWireAddress = target_node->getTargetSpaceWireAddress(),
-        .replyAddress = target_node->getReplyAddress(),
-        .targetLogicalAddress = target_node->getTargetLogicalAddress(),
+        .targetSpaceWireAddress = target_node.getTargetAddress(),
+        .replyAddress = target_node.getReplyAddress(),
+        .targetLogicalAddress = target_node.getTargetLogicalAddress(),
         .initiatorLogicalAddress = getInitiatorLogicalAddress(),
         .transactionID = transaction_id,
         .extendedAddress = 0x00,
@@ -660,8 +659,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
    * internal poll loop can only track one outstanding transaction at a time in
    * that mode.
    */
-  auto write(std::shared_ptr<TargetNodeBase> target_node,
-             uint32_t memory_address, const std::span<const uint8_t> data,
+  auto write(const TargetNode& target_node, uint32_t memory_address,
+             const std::span<const uint8_t> data,
              std::chrono::milliseconds timeout =
                  std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
@@ -749,8 +748,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
    * returns a future containing `operation_not_permitted` when
    * `setAutoPollingMode(true)` is active.
    */
-  auto writeAsync(std::shared_ptr<TargetNodeBase> target_node,
-                  uint32_t memory_address, const std::span<const uint8_t> data,
+  auto writeAsync(const TargetNode& target_node, uint32_t memory_address,
+                  const std::span<const uint8_t> data,
                   std::function<void(std::expected<Packet, std::error_code>)>
                       on_complete) noexcept
       -> std::expected<uint16_t, std::error_code> override {
@@ -775,11 +774,11 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
              on_complete(std::move(result));
 #endif
            })
-        .and_then([this, target_node = std::move(target_node), memory_address,
+        .and_then([this, &target_node, memory_address,
                    data](uint16_t transaction_id) noexcept
                       -> std::expected<uint16_t, std::error_code> {
-          return sendWritePacket_(std::move(target_node), transaction_id,
-                                  memory_address, data)
+          return sendWritePacket_(target_node, transaction_id, memory_address,
+                                  data)
               .transform_error(
                   [this, transaction_id](
                       std::error_code ec) noexcept -> std::error_code {
@@ -798,8 +797,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
    * With auto polling enabled only one synchronous read may be in flight—wait
    * for the call to finish before issuing another synchronous read/write.
    */
-  auto read(std::shared_ptr<TargetNodeBase> target_node,
-            uint32_t memory_address, const std::span<uint8_t> data,
+  auto read(const TargetNode& target_node, uint32_t memory_address,
+            const std::span<uint8_t> data,
             std::chrono::milliseconds timeout =
                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
@@ -913,8 +912,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
    * When auto polling mode is active this function is unavailable and returns a
    * future that resolves to `operation_not_permitted`.
    */
-  auto readAsync(std::shared_ptr<TargetNodeBase> target_node,
-                 uint32_t memory_address, uint32_t data_length,
+  auto readAsync(const TargetNode& target_node, uint32_t memory_address,
+                 uint32_t data_length,
                  std::function<void(std::expected<Packet, std::error_code>)>
                      on_complete) noexcept
       -> std::expected<uint16_t, std::error_code> override {
@@ -939,11 +938,11 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
              on_complete(std::move(result));
 #endif
            })
-        .and_then([this, target_node = std::move(target_node), memory_address,
+        .and_then([this, &target_node, memory_address,
                    data_length](uint16_t transaction_id) noexcept
                       -> std::expected<uint16_t, std::error_code> {
-          return sendReadPacket_(std::move(target_node), transaction_id,
-                                 memory_address, data_length)
+          return sendReadPacket_(target_node, transaction_id, memory_address,
+                                 data_length)
               .transform_error(
                   [this, transaction_id](
                       std::error_code ec) noexcept -> std::error_code {

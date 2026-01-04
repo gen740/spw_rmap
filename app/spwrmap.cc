@@ -201,8 +201,7 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
 }
 
 auto performRead(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
-                 const std::shared_ptr<spw_rmap::TargetNodeBase>& target)
-    -> bool {
+                 const spw_rmap::TargetNode& target) -> bool {
   std::vector<uint8_t> buffer(*opts.length);
   auto res = client.read(target, *opts.address, buffer);
   if (!res.has_value()) {
@@ -219,8 +218,7 @@ auto performRead(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
 }
 
 auto performWrite(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
-                  const std::shared_ptr<spw_rmap::TargetNodeBase>& target)
-    -> bool {
+                  const spw_rmap::TargetNode& target) -> bool {
   auto res = client.write(target, *opts.address, opts.data);
   if (!res.has_value()) {
     std::cerr << "Write failed: " << res.error().message() << "\n";
@@ -266,9 +264,10 @@ auto main(int argc, char** argv) -> int {
     return 1;
   }
 
-  auto target_node = std::make_shared<spw_rmap::TargetNodeDynamic>(
-      kTargetLogicalAddress, std::move(opts.target_address),
-      std::move(opts.reply_address));
+  auto target_node = spw_rmap::TargetNode(kTargetLogicalAddress)
+                         .setTargetAddress(std::move(opts.target_address))
+                         ->setReplyAddress(std::move(opts.reply_address))
+                         .value();
 
   bool success = opts.type == "read" ? performRead(opts, client, target_node)
                                      : performWrite(opts, client, target_node);
