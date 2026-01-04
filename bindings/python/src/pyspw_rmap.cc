@@ -86,6 +86,10 @@ class PySpwRmapTCPNode {
 PYBIND11_MODULE(_core, m) {
   py::class_<PyTargetNode>(m, "TargetNode")
       .def(py::init<>())
+      .def(py::init<uint32_t, std::vector<uint8_t>,
+                    std::vector<uint8_t>>(),
+           py::arg("logical_address"), py::arg("target_spacewire_address"),
+           py::arg("reply_address"))
       .def_readwrite("logical_address", &PyTargetNode::logical_address)
       .def_readwrite("target_spacewire_address",
                      &PyTargetNode::target_spacewire_address)

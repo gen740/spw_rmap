@@ -81,4 +81,14 @@ class TargetNodeDynamic : public TargetNodeBase {
   };
 };
 
+[[nodiscard]] inline auto makeTargetNode(
+    uint8_t logical_address,
+    std::initializer_list<uint8_t> target_spacewire_address,
+    std::initializer_list<uint8_t> reply_address)
+    -> std::shared_ptr<TargetNodeBase> {
+  return std::make_shared<TargetNodeDynamic>(
+      logical_address, std::vector<uint8_t>(target_spacewire_address),
+      std::vector<uint8_t>(reply_address));
+}
+
 };  // namespace spw_rmap
