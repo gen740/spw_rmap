@@ -16,14 +16,16 @@ class TargetNode {
   static constexpr std::size_t kMaxAddressLen = 12;
 
  private:
-  uint8_t logical_address_{0x00};
+  uint8_t logical_address_{0xEF};
   std::array<uint8_t, kMaxAddressLen> target_{};
   std::array<uint8_t, kMaxAddressLen> reply_{};
   uint8_t target_len_{0};
   uint8_t reply_len_{0};
 
  public:
-  constexpr TargetNode(uint8_t logical_address = 0x00) noexcept
+  [[nodiscard]] constexpr TargetNode() noexcept = default;
+
+  [[nodiscard]] constexpr TargetNode(uint8_t logical_address = 0x00) noexcept
       : logical_address_(logical_address) {}
 
   [[nodiscard]] constexpr auto getTargetLogicalAddress() const noexcept
@@ -41,10 +43,16 @@ class TargetNode {
     return {reply_.data(), reply_len_};
   }
 
+  constexpr auto setTargetLogicalAddress(uint8_t logical_address) noexcept
+      -> TargetNode {
+    logical_address_ = logical_address;
+    return *this;
+  }
+
   template <class... Bs>
     requires(sizeof...(Bs) <= kMaxAddressLen &&
              (std::is_convertible_v<Bs, uint8_t> && ...))
-  auto setTargetAddress(Bs... bs) noexcept -> TargetNode {
+  constexpr auto setTargetAddress(Bs... bs) noexcept -> TargetNode {
     target_len_ = static_cast<uint8_t>(sizeof...(Bs));
     std::size_t i = 0;
     ((target_[i++] = static_cast<uint8_t>(bs)), ...);  // NOLINT
@@ -54,14 +62,14 @@ class TargetNode {
   template <class... Bs>
     requires(sizeof...(Bs) <= kMaxAddressLen &&
              (std::is_convertible_v<Bs, uint8_t> && ...))
-  auto setReplyAddress(Bs... bs) noexcept -> TargetNode {
+  constexpr auto setReplyAddress(Bs... bs) noexcept -> TargetNode {
     reply_len_ = static_cast<uint8_t>(sizeof...(Bs));
     std::size_t i = 0;
     ((reply_[i++] = static_cast<uint8_t>(bs)), ...);  // NOLINT
     return *this;
   }
 
-  auto setTargetAddress(std::span<const uint8_t> addr) noexcept
+  constexpr auto setTargetAddress(std::span<const uint8_t> addr) noexcept
       -> std::expected<TargetNode, std::error_code> {
     if (addr.size() > kMaxAddressLen) {
       return std::unexpected(std::make_error_code(std::errc::value_too_large));
@@ -73,7 +81,7 @@ class TargetNode {
     return *this;
   }
 
-  auto setReplyAddress(std::span<const uint8_t> addr) noexcept
+  constexpr auto setReplyAddress(std::span<const uint8_t> addr) noexcept
       -> std::expected<TargetNode, std::error_code> {
     if (addr.size() > kMaxAddressLen) {
       return std::unexpected(std::make_error_code(std::errc::value_too_large));
@@ -85,7 +93,7 @@ class TargetNode {
     return *this;
   }
 
-  auto setTargetAddress(std::initializer_list<uint8_t> addr) noexcept
+  constexpr auto setTargetAddress(std::initializer_list<uint8_t> addr) noexcept
       -> std::expected<TargetNode, std::error_code> {
     if (addr.size() > kMaxAddressLen) {
       return std::unexpected(std::make_error_code(std::errc::value_too_large));
@@ -98,7 +106,7 @@ class TargetNode {
     return *this;
   }
 
-  auto setReplyAddress(std::initializer_list<uint8_t> addr) noexcept
+  constexpr auto setReplyAddress(std::initializer_list<uint8_t> addr) noexcept
       -> std::expected<TargetNode, std::error_code> {
     if (addr.size() > kMaxAddressLen) {
       return std::unexpected(std::make_error_code(std::errc::value_too_large));

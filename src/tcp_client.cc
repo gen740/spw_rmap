@@ -22,6 +22,7 @@ namespace spw_rmap::internal {
 using namespace std::chrono_literals;
 
 namespace {
+
 inline void log_errno_(const char* msg, int err) noexcept {
   if constexpr (!spw_rmap::debug::enabled) {
     (void)msg;
@@ -38,6 +39,7 @@ inline void log_errno_(const char* msg, int err) noexcept {
   oss << msg << ": " << ec.message() << " (errno=" << ec.value() << ")";
   spw_rmap::debug::debug(oss.str());
 }
+
 }  // namespace
 
 static auto close_retry_(int fd) noexcept -> void {
@@ -235,8 +237,14 @@ static inline auto gai_category() noexcept -> const std::error_category& {
     std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
   if (fd_ >= 0) [[unlikely]] {
-    spw_rmap::debug::debug("Already connected");
-    return std::unexpected{std::make_error_code(std::errc::already_connected)};
+    if (socket_alive_(fd_)) [[likely]] {
+      spw_rmap::debug::debug("Already connected");
+      return std::unexpected{
+          std::make_error_code(std::errc::already_connected)};
+    }
+    spw_rmap::debug::debug(
+        "Existing connection unhealthy, reconnecting from connect()");
+    disconnect();
   }
   addrinfo hints{};
   hints.ai_family = AF_INET;
