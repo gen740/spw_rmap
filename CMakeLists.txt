@@ -56,7 +56,7 @@ configure_package_config_file(
 
 write_basic_package_version_file(
   ${CMAKE_CURRENT_BINARY_DIR}/spw_rmapConfigVersion.cmake
-  VERSION 0.0.1
+  VERSION 0.2.0
   COMPATIBILITY SameMajorVersion)
 
 file(GLOB HEADER_FILES ${CMAKE_SOURCE_DIR}/include/spw_rmap/*.hh)
