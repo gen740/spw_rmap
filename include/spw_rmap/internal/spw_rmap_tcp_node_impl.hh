@@ -225,16 +225,15 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         return std::unexpected{
             std::make_error_code(std::errc::connection_aborted)};
       }
-      if (header.at(0) != 0x00 && header.at(0) != 0x01 &&
-          header.at(0) != 0x02 && header.at(0) != 0x31 && header.at(0) != 0x30)
-          [[unlikely]] {
+      if (header[0] != 0x00 && header[0] != 0x01 && header[0] != 0x02 &&
+          header[0] != 0x31 && header[0] != 0x30) [[unlikely]] {
         spw_rmap::debug::debug("Received packet with invalid type byte: ",
-                               static_cast<int>(header.at(0)));
+                               static_cast<int>(header[0]));
         return std::unexpected{std::make_error_code(std::errc::bad_message)};
       }
-      if (header.at(1) != 0x00) [[unlikely]] {
+      if (header[1] != 0x00) [[unlikely]] {
         spw_rmap::debug::debug("Received packet with invalid reserved byte: ",
-                               static_cast<int>(header.at(1)));
+                               static_cast<int>(header[1]));
         return std::unexpected{std::make_error_code(std::errc::bad_message)};
       }
 
@@ -258,7 +257,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           recv_buffer = std::span(recv_buf_).subspan(total_size);
         }
       }
-      switch (header.at(0)) {
+      switch (header[0]) {
         case 0x00: {
           auto res = recvExact_(recv_buffer.first(*dataLength));
           if (!res.has_value()) [[unlikely]] {
@@ -295,11 +294,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         case 0x30:
         case 0x31: {
           // Timecode packet
-          if (header.at(2) != 0x00 || header.at(3) != 0x00 ||
-              header.at(4) != 0x00 || header.at(5) != 0x00 ||
-              header.at(6) != 0x00 || header.at(7) != 0x00 ||
-              header.at(8) != 0x00 || header.at(9) != 0x00 ||
-              header.at(10) != 0x00 || header.at(11) != 0x02) [[unlikely]] {
+          if (header[2] != 0x00 || header[3] != 0x00 || header[4] != 0x00 ||
+              header[5] != 0x00 || header[6] != 0x00 || header[7] != 0x00 ||
+              header[8] != 0x00 || header[9] != 0x00 || header[10] != 0x00 ||
+              header[11] != 0x02) [[unlikely]] {
             spw_rmap::debug::debug("Received invalid Timecode packet header");
             return std::unexpected{
                 std::make_error_code(std::errc::bad_message)};
@@ -310,16 +308,16 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             spw_rmap::debug::debug("Failed to receive Timecode packet data");
             return std::unexpected(res.error());
           }
-          if (tc.at(1) != 0x00) [[unlikely]] {
+          if (tc[1] != 0x00) [[unlikely]] {
             spw_rmap::debug::debug("Received invalid Timecode packet data");
             return std::unexpected{
                 std::make_error_code(std::errc::bad_message)};
           }
-          on_timecode_callback_(tc.at(0) & 0x3F);
+          on_timecode_callback_(tc[0] & 0x3F);
         } break;
         default:
           spw_rmap::debug::debug("Received packet with unknown type byte: ",
-                                 static_cast<int>(header.at(0)));
+                                 static_cast<int>(header[0]));
           return std::unexpected{std::make_error_code(std::errc::bad_message)};
       }
     }
