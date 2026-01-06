@@ -371,8 +371,7 @@ auto main(int argc, char** argv) -> int {
 
   auto target = spw_rmap::TargetNode(kTargetLogicalAddress)
                     .setTargetAddress(std::move(opts.target_address))
-                    ->setReplyAddress(std::move(opts.reply_address))
-                    .value();
+                    .setReplyAddress(std::move(opts.reply_address));
 
   // Initial write of the pattern into the device memory.
   for (std::size_t offset = 0; offset < total_bytes; offset += kChunkSize) {

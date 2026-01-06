@@ -51,38 +51,44 @@ class PySpwRmapTCPNode {
   auto read(PyTargetNode target_node, uint32_t memory_adderss,
             uint32_t data_length) -> std::vector<uint8_t> {
     std::vector<uint8_t> data(data_length);
-    auto spw_target_node = spw_rmap::TargetNode(target_node.logical_address);
-    auto res = spw_target_node.setTargetAddress(
-        std::move(target_node.target_spacewire_address));
-    if (!res) {
-      throw std::system_error(res.error());
+    if (target_node.reply_address.size() >
+        spw_rmap::TargetNode::kMaxAddressLen) {
+      throw std::out_of_range("Reply address length exceeds maximum allowed.");
     }
-    res = spw_target_node.setReplyAddress(std::move(target_node.reply_address));
-    if (!res) {
-      throw std::system_error(res.error());
+    if (target_node.target_spacewire_address.size() >
+        spw_rmap::TargetNode::kMaxAddressLen) {
+      throw std::out_of_range("Target address length exceeds maximum allowed.");
     }
+
+    auto spw_target_node =
+        spw_rmap::TargetNode(target_node.logical_address)
+            .setTargetAddress(std::move(target_node.target_spacewire_address))
+            .setReplyAddress(std::move(target_node.reply_address));
     auto res_read = node_.read(spw_target_node, memory_adderss, data, 100ms);
     if (!res_read) {
-      throw std::system_error(res.error());
+      throw std::system_error(res_read.error());
     }
     return data;
   }
 
   void write(PyTargetNode target_node, uint32_t memory_adderss,
              const std::vector<uint8_t>& data) {
-    auto spw_target_node = spw_rmap::TargetNode(target_node.logical_address);
-    auto res = spw_target_node.setTargetAddress(
-        std::move(target_node.target_spacewire_address));
-    if (!res) {
-      throw std::system_error(res.error());
+    if (target_node.target_spacewire_address.size() >
+        spw_rmap::TargetNode::kMaxAddressLen) {
+      throw std::out_of_range("Target address length exceeds maximum allowed.");
     }
-    res = spw_target_node.setReplyAddress(std::move(target_node.reply_address));
-    if (!res) {
-      throw std::system_error(res.error());
+    if (target_node.reply_address.size() >
+        spw_rmap::TargetNode::kMaxAddressLen) {
+      throw std::out_of_range("Reply address length exceeds maximum allowed.");
     }
+
+    auto spw_target_node =
+        spw_rmap::TargetNode(target_node.logical_address)
+            .setTargetAddress(std::move(target_node.target_spacewire_address))
+            .setReplyAddress(std::move(target_node.reply_address));
     auto res_write = node_.write(spw_target_node, memory_adderss, data, 100ms);
     if (!res_write) {
-      throw std::system_error(res.error());
+      throw std::system_error(res_write.error());
     }
   }
 
