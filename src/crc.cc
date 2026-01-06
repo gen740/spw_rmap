@@ -42,7 +42,7 @@ constexpr std::array<uint8_t, 256> CRC_LOOKUP_TABLE = {
     0xba, 0x2b, 0x59, 0xc8, 0xbd, 0x2c, 0x5e, 0xcf   //
 };
 
-auto calcCRC(std::span<const uint8_t> data, uint8_t crc) noexcept -> uint8_t {
+auto CalcCrc(std::span<const uint8_t> data, uint8_t crc) noexcept -> uint8_t {
   for (const auto& byte : data) {
     // This is guaranteed to be safe because the lookup table is 256 bytes long
     // and the byte is in the range 0-255.

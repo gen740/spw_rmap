@@ -21,5 +21,4 @@ CompileFlags:
     - -isystem/nix/store/rrjy7x4jpxp92gs1prpbg79ng0mcl5hj-apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks (framework directory)
     - -isystem/nix/store/lm725blqlq4bjmfrxps1wdizgh3k4q6z-libSystem-B/include
 
-
   CompilationDatabase: ./build

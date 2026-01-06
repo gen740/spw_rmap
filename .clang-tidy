@@ -2,6 +2,7 @@ Checks:
   - modernize-*
   - bugprone-*
   - cppcoreguidelines-*
+  - readability-identifier-naming
   - -bugprone-easily-swappable-parameters
   - -cppcoreguidelines-avoid-magic-numbers
   - -modernize-use-std-numbers
@@ -27,3 +28,66 @@ ExtraArgs:
   - -isystem/nix/store/rrjy7x4jpxp92gs1prpbg79ng0mcl5hj-apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include
   - -isystem/nix/store/rrjy7x4jpxp92gs1prpbg79ng0mcl5hj-apple-sdk-14.4/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks (framework directory)
   - -isystem/nix/store/lm725blqlq4bjmfrxps1wdizgh3k4q6z-libSystem-B/include
+
+CheckOptions:
+  # Class: CamelCase
+  - { key: readability-identifier-naming.ClassCase, value: CamelCase }
+  - { key: readability-identifier-naming.StructCase, value: CamelCase }
+  - { key: readability-identifier-naming.EnumCase, value: CamelCase }
+  - { key: readability-identifier-naming.TypeAliasCase, value: CamelCase }
+  - { key: readability-identifier-naming.TemplateParameterCase, value: CamelCase }
+  - { key: readability-identifier-naming.ConceptCase, value: CamelCase }
+
+  # Function: CamelCase
+  - { key: readability-identifier-naming.FunctionCase, value: CamelCase }
+  - { key: readability-identifier-naming.MethodCase, value: CamelCase }
+
+  # Variable: lower_case
+  - { key: readability-identifier-naming.VariableCase, value: lower_case }
+  - { key: readability-identifier-naming.ParameterCase, value: lower_case }
+
+  # Namespace: lower_case
+  - { key: readability-identifier-naming.NamespaceCase, value: lower_case }
+
+  # Class members: lower_case with underscore suffix
+  - { key: readability-identifier-naming.PrivateMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.PrivateMemberSuffix, value: "_" }
+  - { key: readability-identifier-naming.ProtectedMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.ProtectedMemberSuffix, value: "_" }
+  - { key: readability-identifier-naming.PublicMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.PublicMemberSuffix, value: "_" }
+
+  # struct members: lower_case without underscore suffix
+  - { key: readability-identifier-naming.PublicMemberCase, value: lower_case }
+  - { key: readability-identifier-naming.PublicMemberSuffix, value: "" }
+
+  # Constant: k + CamelCase
+  - { key: readability-identifier-naming.ConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.ConstantPrefix, value: "k" }
+
+  # Enum constant: k + CamelCase
+  - { key: readability-identifier-naming.EnumConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.EnumConstantPrefix, value: "k" }
+
+  # Macro: UPPER_CASE
+  - { key: readability-identifier-naming.MacroDefinitionCase, value: UPPER_CASE }
+  - { key: readability-identifier-naming.MacroDefinitionPrefix, value: "MYPROJECT_" }
+
+  # Global Constants: k + CamelCase
+  - { key: readability-identifier-naming.GlobalConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.GlobalConstantPrefix, value: "k" }
+
+  # File Scope static: k + CamelCase
+  - { key: readability-identifier-naming.StaticConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.StaticConstantPrefix, value: "k" }
+
+  # Class Constants: k + CamelCase
+  - { key: readability-identifier-naming.ClassConstantCase, value: CamelCase }
+  - { key: readability-identifier-naming.ClassConstantPrefix, value: "k" }
+
+  # constexpr Variables: k + CamelCase
+  - { key: readability-identifier-naming.ConstexprVariableCase, value: CamelCase }
+  - { key: readability-identifier-naming.ConstexprVariablePrefix, value: "k" }
+
+  # Parameters: lower_case
+  - { key: readability-identifier-naming.ParameterCase, value: lower_case }

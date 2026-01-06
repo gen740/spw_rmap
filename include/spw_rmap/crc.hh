@@ -15,7 +15,7 @@ namespace spw_rmap::crc {
  *
  * @return uint8_t The calculated CRC value.
  */
-auto calcCRC(std::span<const uint8_t> data, uint8_t crc = 0x00) noexcept
+auto CalcCrc(std::span<const uint8_t> data, uint8_t crc = 0x00) noexcept
     -> uint8_t;
 
 };  // namespace spw_rmap::crc
