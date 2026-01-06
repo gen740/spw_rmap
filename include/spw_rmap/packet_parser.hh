@@ -10,42 +10,43 @@
 namespace spw_rmap {
 
 enum class PacketType {
-  Undefined = 0,
-  Read = 1,
-  Write = 2,
-  ReadReply = 3,
-  WriteReply = 4,
+  kUndefined = 0,
+  kRead = 1,
+  kWrite = 2,
+  kReadReply = 3,
+  kWriteReply = 4,
 };
 
 enum class PacketStatusCode : uint8_t {
-  CommandExecutedSuccessfully = 0,
-  GeneralErrorCode = 1,
-  UnusedRMAPPacketTypeOrCommandCode = 2,
-  InvalidKey = 3,
-  InvalidDataCRC = 4,
-  EarlyEOP = 5,
-  TooMuchData = 6,
-  EEP = 7,
-  VerifyBufferOverrun = 9,
-  RMAPCommandNotImplementedOrNotAuthorised = 10,
-  RMWDataLengthError = 11,
-  InvalidTargetLogicalAddress = 12,
+  kCommandExecutedSuccessfully = 0,
+  kGeneralErrorCode = 1,
+  kUnusedRmapPacketTypeOrCommandCode = 2,
+  kInvalidKey = 3,
+  kInvalidDataCrc = 4,
+  kEarlyEop = 5,
+  kTooMuchData = 6,
+  kEep = 7,
+  kVerifyBufferOverrun = 9,
+  kRmapCommandNotImplementedOrNotAuthorised = 10,
+  kRmwDataLengthError = 11,
+  kInvalidTargetLogicalAddress = 12,
 };
 
 struct Packet {
-  std::span<const uint8_t> targetSpaceWireAddress{};
-  std::span<const uint8_t> replyAddress{};
-  uint8_t initiatorLogicalAddress{};
+  std::span<const uint8_t> target_spw_address{};
+  std::span<const uint8_t> reply_address{};
+  std::span<const uint8_t> reply_spw_address{};
+  uint8_t initiator_logical_address{};
   uint8_t instruction{};
   uint8_t key{};
   PacketStatusCode status{};
-  uint8_t targetLogicalAddress{};
-  uint16_t transactionID{};
-  uint8_t extendedAddress{};
+  uint8_t target_logical_address{};
+  uint16_t transaction_id{};
+  uint8_t extended_address{};
   uint32_t address{};
-  uint32_t dataLength{};
+  uint32_t data_length{};
   std::span<const uint8_t> data{};
-  PacketType type{PacketType::Undefined};
+  PacketType type{PacketType::kUndefined};
 };
 
 auto ParseRMAPPacket(const std::span<const uint8_t> data) noexcept

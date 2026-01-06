@@ -81,7 +81,7 @@ struct ReadReplyPacketConfig {
   uint16_t transaction_id{0};
 
   // Status
-  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
+  PacketStatusCode status{PacketStatusCode::kCommandExecutedSuccessfully};
 
   // Instruction option (copied from command)
   bool increment_mode{true};
@@ -106,7 +106,7 @@ struct WriteReplyPacketConfig {
   uint16_t transaction_id{0};
 
   // Status
-  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
+  PacketStatusCode status{PacketStatusCode::kCommandExecutedSuccessfully};
 
   // Instruction options (copied from command)
   bool increment_mode{true};

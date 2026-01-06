@@ -26,7 +26,7 @@ class TCPServer {
   int listen_fd_ = -1;  // listening socket
   int client_fd_ = -1;  // accepted client socket
 
-  static auto close_retry_(int fd) noexcept -> void;
+  static auto CloseRetry(int fd) noexcept -> void;
   std::string bind_address_;
   std::string port_;
   std::optional<std::chrono::microseconds> last_send_timeout_{};
@@ -44,44 +44,44 @@ class TCPServer {
 
   ~TCPServer() noexcept;
 
-  [[nodiscard]] auto accept_once() noexcept
+  [[nodiscard]] auto AcceptOnce() noexcept
       -> std::expected<void, std::error_code>;
 
-  [[nodiscard]] auto ensureConnect() noexcept
+  [[nodiscard]] auto EnsureConnect() noexcept
       -> std::expected<void, std::error_code>;
 
-  [[nodiscard]] auto setSendTimeout(std::chrono::microseconds timeout) noexcept
+  [[nodiscard]] auto SetSendTimeout(std::chrono::microseconds timeout) noexcept
       -> std::expected<void, std::error_code>;
 
-  [[nodiscard]] auto setReceiveTimeout(
+  [[nodiscard]] auto SetReceiveTimeout(
       std::chrono::microseconds timeout) noexcept
       -> std::expected<void, std::error_code>;
 
-  [[nodiscard]] auto sendAll(std::span<const uint8_t> data) noexcept
+  [[nodiscard]] auto SendAll(std::span<const uint8_t> data) noexcept
       -> std::expected<void, std::error_code>;
 
-  [[nodiscard]] auto recvSome(std::span<uint8_t> buf) noexcept
+  [[nodiscard]] auto RecvSome(std::span<uint8_t> buf) noexcept
       -> std::expected<size_t, std::error_code>;
 
-  [[nodiscard]] auto shutdown() noexcept
+  [[nodiscard]] auto Shutdown() noexcept
       -> std::expected<void, std::error_code>;
 
-  [[nodiscard]] auto getIpAddress() const noexcept -> const std::string& {
+  [[nodiscard]] auto GetIpAddress() const noexcept -> const std::string& {
     return bind_address_;
   }
 
-  auto setIpAddress(std::string ip_address) noexcept -> void {
+  auto SetIpAddress(std::string ip_address) noexcept -> void {
     bind_address_ = std::move(ip_address);
   }
 
-  [[nodiscard]] auto getPort() const noexcept -> const std::string& {
+  [[nodiscard]] auto GetPort() const noexcept -> const std::string& {
     return port_;
   }
 
-  auto setPort(std::string port) noexcept -> void { port_ = std::move(port); }
+  auto SetPort(std::string port) noexcept -> void { port_ = std::move(port); }
 
  private:
-  auto resetTimeoutCache() noexcept -> void;
+  auto ResetTimeoutCache() noexcept -> void;
 };
 
 }  // namespace spw_rmap::internal

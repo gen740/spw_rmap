@@ -88,7 +88,7 @@ TEST(TcpClientServer, ServerRecieve) {
     try {
       std::string port_str = std::to_string(port);
       TCPServer server("127.0.0.1", port_str);
-      auto res = server.accept_once();
+      auto res = server.AcceptOnce();
       if (!res.has_value()) {
         FAIL() << "Failed to accept connection: " << res.error().message();
       }
@@ -97,7 +97,7 @@ TEST(TcpClientServer, ServerRecieve) {
       std::vector<uint8_t> buf;
       buf.resize(16);
       while (!server_stop.load(std::memory_order_acquire)) {
-        auto n = server.recvSome(buf);
+        auto n = server.RecvSome(buf);
         if (!n.has_value()) {
           FAIL() << "Server recv_some failed: " << n.error().message();
         }
@@ -117,7 +117,7 @@ TEST(TcpClientServer, ServerRecieve) {
 
   std::string port_str = std::to_string(port);
   TCPClient client("localhost", port_str);
-  auto res = client.connect(500ms);
+  auto res = client.Connect(500ms);
   if (!res.has_value()) {
     FAIL() << "Failed to connect to server: " << res.error().message();
   }
@@ -135,7 +135,7 @@ TEST(TcpClientServer, ServerRecieve) {
     if (mes_size_sent + mes_size > msg.size()) {
       mes_size = msg.size() - mes_size_sent;
     }
-    auto res = client.sendAll(
+    auto res = client.SendAll(
         std::span<const uint8_t>(msg.data() + mes_size_sent, mes_size));
     if (!res.has_value()) {
       FAIL() << "Client send_all failed: " << res.error().message();
@@ -178,7 +178,7 @@ TEST(TcpClientServer, ClientRecieve) {
     try {
       std::string port_str = std::to_string(port);
       TCPServer server("127.0.0.1", port_str);
-      auto res = server.accept_once();
+      auto res = server.AcceptOnce();
       if (!res.has_value()) {
         FAIL() << "Failed to accept connection: " << res.error().message();
       }
@@ -188,7 +188,7 @@ TEST(TcpClientServer, ClientRecieve) {
         if (mes_size_sent + mes_size > msg.size()) {
           mes_size = msg.size() - mes_size_sent;
         }
-        auto res = server.sendAll(
+        auto res = server.SendAll(
             std::span<const uint8_t>(msg.data() + mes_size_sent, mes_size));
         if (!res.has_value()) {
           FAIL() << "Server send_all failed: " << res.error().message();
@@ -204,7 +204,7 @@ TEST(TcpClientServer, ClientRecieve) {
 
   std::string port_str = std::to_string(port);
   TCPClient client("localhost", port_str);
-  auto res = client.connect(500ms);
+  auto res = client.Connect(500ms);
   if (!res.has_value()) {
     FAIL() << "Failed to connect to server: " << res.error().message();
   }
@@ -215,7 +215,7 @@ TEST(TcpClientServer, ClientRecieve) {
   buf.resize(16);
   auto total_recvd = 0U;
   while (true) {
-    auto n = client.recvSome(buf);
+    auto n = client.RecvSome(buf);
     if (!n.has_value()) {
       FAIL() << "Client recv_some failed: " << n.error().message();
     }
@@ -344,7 +344,7 @@ TEST(TcpClientServer, ConnectReconnectsAfterDrop) {
         (void)::connect(tmp, reinterpret_cast<sockaddr*>(&sin), sizeof(sin));
         close_fd_retry(tmp);
       }
-      client_ref.disconnect();
+      client_ref.Disconnect();
       if (thread != nullptr && thread->joinable()) {
         thread->join();
       }
@@ -355,7 +355,7 @@ TEST(TcpClientServer, ConnectReconnectsAfterDrop) {
             std::future_status::ready)
       << "Server did not start listening in time";
 
-  auto first_res = client.connect(500ms);
+  auto first_res = client.Connect(500ms);
   ASSERT_TRUE(first_res.has_value())
       << "Initial connect failed: " << first_res.error().message();
 
@@ -367,7 +367,7 @@ TEST(TcpClientServer, ConnectReconnectsAfterDrop) {
   ASSERT_TRUE(first_connection_closed.load(std::memory_order_acquire))
       << "Server did not close the first connection in time";
 
-  auto reconnect_res = client.connect(500ms);
+  auto reconnect_res = client.Connect(500ms);
   ASSERT_TRUE(reconnect_res.has_value())
       << "Reconnect attempt failed: " << reconnect_res.error().message();
 
@@ -379,7 +379,7 @@ TEST(TcpClientServer, ConnectReconnectsAfterDrop) {
   ASSERT_TRUE(second_connection_established.load(std::memory_order_acquire))
       << "Server did not accept the reconnection";
 
-  client.disconnect();
+  client.Disconnect();
   server_stop.store(true, std::memory_order_release);
   if (server_thread.joinable()) {
     server_thread.join();

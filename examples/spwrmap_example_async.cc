@@ -1,5 +1,4 @@
 #include <array>
-#include <chrono>
 #include <iostream>
 #include <thread>
 
@@ -11,35 +10,35 @@ using namespace std::chrono_literals;
 auto main() -> int {
   spw_rmap::SpwRmapTCPClient client(
       {.ip_address = "192.168.1.100", .port = "10030"});
-  client.setInitiatorLogicalAddress(0xFE);
-  if (auto res = client.connect(1s); !res.has_value()) {
+  client.SetInitiatorLogicalAddress(0xFE);
+  if (auto res = client.Connect(1s); !res.has_value()) {
     std::cerr << "Connect failed: " << res.error().message() << '\n';
     return 1;
   }
   std::cout << "Connected to RMAP bridge (async example)\n";
 
   auto target = spw_rmap::TargetNode(0x32)
-                    .setTargetAddress(0x06, 0x02)
-                    .setReplyAddress(0x01, 0x03);
+                    .SetTargetAddress(0x06, 0x02)
+                    .SetReplyAddress(0x01, 0x03);
 
   std::thread loop([&client]() -> void {
-    auto res = client.runLoop();
+    auto res = client.RunLoop();
     if (!res.has_value()) {
       std::cerr << "runLoop error: " << res.error().message() << '\n';
     }
   });
 
-  const uint32_t demo_address = 0x44A20000;
-  const std::array<uint8_t, 4> payload{0x01, 0x02, 0x03, 0x04};
+  const uint32_t kDemoAddress = 0x44A20000;
+  const std::array<uint8_t, 4> kPayload{0x01, 0x02, 0x03, 0x04};
 
   bool ok = true;
-  if (auto res = client.write(target, demo_address, payload);
+  if (auto res = client.Write(target, kDemoAddress, kPayload);
       !res.has_value()) {
     std::cerr << "Sync write failed: " << res.error().message() << '\n';
     ok = false;
   } else {
     std::array<uint8_t, 4> buffer{};
-    if (auto res = client.read(target, demo_address, std::span(buffer));
+    if (auto res = client.Read(target, kDemoAddress, std::span(buffer));
         res.has_value()) {
       std::cout << "Sync read:";
       for (auto byte : buffer) {
@@ -53,8 +52,8 @@ auto main() -> int {
   }
 
   if (ok) {
-    auto write_async_res = client.writeAsync(
-        target, demo_address, payload,
+    auto write_async_res = client.WriteAsync(
+        target, kDemoAddress, kPayload,
         [](const std::expected<spw_rmap::Packet, std::error_code> packet)
             -> void {
           if (packet.has_value()) {
@@ -71,8 +70,8 @@ auto main() -> int {
   }
 
   if (ok) {
-    auto read_res = client.readAsync(
-        target, demo_address, payload.size(),
+    auto read_res = client.ReadAsync(
+        target, kDemoAddress, kPayload.size(),
         [](std::expected<spw_rmap::Packet, std::error_code> packet) -> void {
           if (packet.has_value()) {
             std::cout << "Async read returned " << packet->data.size()
@@ -84,7 +83,7 @@ auto main() -> int {
     }
   }
 
-  if (auto res = client.shutdown(); !res.has_value()) {
+  if (auto res = client.Shutdown(); !res.has_value()) {
     std::cerr << "Shutdown error: " << res.error().message() << '\n';
   }
   if (loop.joinable()) {

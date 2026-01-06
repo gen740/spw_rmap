@@ -29,16 +29,16 @@ class SpwRmapNodeBase {
 
   SpwRmapNodeBase() : SpwRmapNodeBase(0x0000, 0x00FF) {}
 
-  [[nodiscard]] auto isVerifyMode() const noexcept -> bool {
+  [[nodiscard]] auto IsVerifyMode() const noexcept -> bool {
     return verify_mode_;
   }
 
-  auto acquireTransaction(TransactionDatabase::Callback callback = {}) noexcept
+  auto AcquireTransaction(TransactionDatabase::Callback callback = {}) noexcept
       -> std::expected<uint16_t, std::error_code> {
-    return transaction_id_database_.acquire(std::move(callback));
+    return transaction_id_database_.Acquire(std::move(callback));
   }
 
-  [[nodiscard]] auto clampTransactionTimeout(
+  [[nodiscard]] auto ClampTransactionTimeout(
       std::chrono::milliseconds requested) const noexcept
       -> std::chrono::milliseconds {
     if (transaction_id_timeout_.count() == 0) {
@@ -50,7 +50,7 @@ class SpwRmapNodeBase {
     return requested;
   }
 
-  [[nodiscard]] auto getTransactionDatabase() noexcept -> TransactionDatabase& {
+  [[nodiscard]] auto GetTransactionDatabase() noexcept -> TransactionDatabase& {
     return transaction_id_database_;
   }
 
@@ -63,17 +63,17 @@ class SpwRmapNodeBase {
   SpwRmapNodeBase(SpwRmapNodeBase&&) = delete;
   auto operator=(SpwRmapNodeBase&&) -> SpwRmapNodeBase& = delete;
 
-  virtual auto poll() -> std::expected<void, std::error_code> = 0;
+  virtual auto Poll() -> std::expected<void, std::error_code> = 0;
 
-  virtual auto runLoop() -> std::expected<void, std::error_code> = 0;
+  virtual auto RunLoop() -> std::expected<void, std::error_code> = 0;
 
-  virtual auto registerOnWrite(std::function<void(Packet)> onWrite) noexcept
+  virtual auto RegisterOnWrite(std::function<void(Packet)> on_write) noexcept
       -> void = 0;
 
-  virtual auto registerOnRead(
-      std::function<std::vector<uint8_t>(Packet)> onRead) noexcept -> void = 0;
+  virtual auto RegisterOnRead(
+      std::function<std::vector<uint8_t>(Packet)> on_read) noexcept -> void = 0;
 
-  virtual auto registerOnTimeCode(
+  virtual auto RegisterOnTimeCode(
       std::function<void(uint8_t)> /* onTimeCode */) noexcept -> void {}
 
   /**
@@ -86,7 +86,7 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Data to write.
    */
-  virtual auto write(const TargetNode& target_node, uint32_t memory_address,
+  virtual auto Write(const TargetNode& target_node, uint32_t memory_address,
                      const std::span<const uint8_t> data,
                      std::chrono::milliseconds timeout =
                          std::chrono::milliseconds{100}) noexcept
@@ -102,7 +102,7 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Reference to a span where the read data will be stored.
    */
-  virtual auto read(const TargetNode& target_node, uint32_t memory_address,
+  virtual auto Read(const TargetNode& target_node, uint32_t memory_address,
                     const std::span<uint8_t> data,
                     std::chrono::milliseconds timeout =
                         std::chrono::milliseconds{100}) noexcept
@@ -118,7 +118,7 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Data to write.
    */
-  virtual auto writeAsync(
+  virtual auto WriteAsync(
       const TargetNode& target_node, uint32_t memory_address,
       const std::span<const uint8_t> data,
       std::function<void(std::expected<Packet, std::error_code>)>
@@ -134,7 +134,7 @@ class SpwRmapNodeBase {
    * @param memory_address Target memory address.
    * @param data Reference to a span where the read data will be stored.
    */
-  virtual auto readAsync(
+  virtual auto ReadAsync(
       const TargetNode& target_node, uint32_t memory_address,
       uint32_t data_length,
       std::function<void(std::expected<Packet, std::error_code>)>
@@ -147,7 +147,7 @@ class SpwRmapNodeBase {
    *
    * @param timecode Time code to emit.
    */
-  virtual auto emitTimeCode(uint8_t timecode) noexcept
+  virtual auto EmitTimeCode(uint8_t timecode) noexcept
       -> std::expected<void, std::error_code> = 0;
 
   /**
@@ -160,26 +160,26 @@ class SpwRmapNodeBase {
    * ID timeout to guarantee consistency. Supplying `0ms` disables automatic
    * reclamation and clamping entirely.
    */
-  virtual auto setTransactionTimeout(std::chrono::milliseconds timeout) noexcept
+  virtual auto SetTransactionTimeout(std::chrono::milliseconds timeout) noexcept
       -> void {
     transaction_id_timeout_ = timeout;
-    transaction_id_database_.setTimeout(timeout);
+    transaction_id_database_.SetTimeout(timeout);
   }
 
-  virtual auto cancelTransaction(uint16_t transaction_id) noexcept -> void {
-    transaction_id_database_.release(transaction_id);
+  virtual auto CancelTransaction(uint16_t transaction_id) noexcept -> void {
+    transaction_id_database_.Release(transaction_id);
   }
 
-  virtual auto setVerifyMode(bool verify_mode) noexcept -> void {
+  virtual auto SetVerifyMode(bool verify_mode) noexcept -> void {
     verify_mode_ = verify_mode;
   }
 
-  [[nodiscard]] virtual auto getInitiatorLogicalAddress() const noexcept
+  [[nodiscard]] virtual auto GetInitiatorLogicalAddress() const noexcept
       -> uint8_t {
     return initiator_logical_address_;
   }
 
-  virtual auto setInitiatorLogicalAddress(uint8_t logical_address) noexcept
+  virtual auto SetInitiatorLogicalAddress(uint8_t logical_address) noexcept
       -> void {
     initiator_logical_address_ = logical_address;
   }

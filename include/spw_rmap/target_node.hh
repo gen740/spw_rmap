@@ -27,22 +27,22 @@ class TargetNode {
   [[nodiscard]] constexpr TargetNode(uint8_t logical_address = 0x00) noexcept
       : logical_address_(logical_address) {}
 
-  [[nodiscard]] constexpr auto getTargetLogicalAddress() const noexcept
+  [[nodiscard]] constexpr auto GetTargetLogicalAddress() const noexcept
       -> uint8_t {
     return logical_address_;
   }
 
-  [[nodiscard]] constexpr auto getTargetAddress() const noexcept
+  [[nodiscard]] constexpr auto GetTargetAddress() const noexcept
       -> std::span<const uint8_t> {
     return {target_.data(), target_len_};
   }
 
-  [[nodiscard]] constexpr auto getReplyAddress() const noexcept
+  [[nodiscard]] constexpr auto GetReplyAddress() const noexcept
       -> std::span<const uint8_t> {
     return {reply_.data(), reply_len_};
   }
 
-  constexpr auto setTargetLogicalAddress(uint8_t logical_address) noexcept
+  constexpr auto SetTargetLogicalAddress(uint8_t logical_address) noexcept
       -> TargetNode& {
     logical_address_ = logical_address;
     return *this;
@@ -51,7 +51,7 @@ class TargetNode {
   template <class... Bs>
     requires(sizeof...(Bs) <= kMaxAddressLen &&
              (std::is_convertible_v<Bs, uint8_t> && ...))
-  constexpr auto setTargetAddress(Bs... bs) noexcept -> TargetNode& {
+  constexpr auto SetTargetAddress(Bs... bs) noexcept -> TargetNode& {
     target_len_ = static_cast<uint8_t>(sizeof...(Bs));
     std::size_t i = 0;
     ((target_[i++] = static_cast<uint8_t>(bs)), ...);  // NOLINT
@@ -61,14 +61,14 @@ class TargetNode {
   template <class... Bs>
     requires(sizeof...(Bs) <= kMaxAddressLen &&
              (std::is_convertible_v<Bs, uint8_t> && ...))
-  constexpr auto setReplyAddress(Bs... bs) noexcept -> TargetNode& {
+  constexpr auto SetReplyAddress(Bs... bs) noexcept -> TargetNode& {
     reply_len_ = static_cast<uint8_t>(sizeof...(Bs));
     std::size_t i = 0;
     ((reply_[i++] = static_cast<uint8_t>(bs)), ...);  // NOLINT
     return *this;
   }
 
-  constexpr auto setTargetAddress(std::span<const uint8_t> addr) noexcept
+  constexpr auto SetTargetAddress(std::span<const uint8_t> addr) noexcept
       -> TargetNode& {
     assert(addr.size() <= kMaxAddressLen);
     target_len_ = static_cast<uint8_t>(addr.size());
@@ -78,7 +78,7 @@ class TargetNode {
     return *this;
   }
 
-  constexpr auto setReplyAddress(std::span<const uint8_t> addr) noexcept
+  constexpr auto SetReplyAddress(std::span<const uint8_t> addr) noexcept
       -> TargetNode& {
     assert(addr.size() <= kMaxAddressLen);
     reply_len_ = static_cast<uint8_t>(addr.size());
@@ -88,7 +88,7 @@ class TargetNode {
     return *this;
   }
 
-  constexpr auto setTargetAddress(std::initializer_list<uint8_t> addr) noexcept
+  constexpr auto SetTargetAddress(std::initializer_list<uint8_t> addr) noexcept
       -> TargetNode& {
     assert(addr.size() <= kMaxAddressLen);
     target_len_ = static_cast<uint8_t>(addr.size());
@@ -99,7 +99,7 @@ class TargetNode {
     return *this;
   }
 
-  constexpr auto setReplyAddress(std::initializer_list<uint8_t> addr) noexcept
+  constexpr auto SetReplyAddress(std::initializer_list<uint8_t> addr) noexcept
       -> TargetNode& {
     assert(addr.size() <= kMaxAddressLen);
     reply_len_ = static_cast<uint8_t>(addr.size());

@@ -16,16 +16,16 @@ class Profiler {
   using TimePoint = Clock::time_point;
   using Duration = Clock::duration;
 
-  static constexpr long double tick_to_ns_ =
+  static constexpr long double kTickToNs =
       (static_cast<long double>(Clock::period::num) * 1'000'000'000.0L) /
       static_cast<long double>(Clock::period::den);
 
-  static auto get() noexcept -> Profiler& {
+  static auto Get() noexcept -> Profiler& {
     static Profiler instance;
     return instance;
   }
 
-  auto clear() noexcept -> void {
+  auto Clear() noexcept -> void {
     for (auto& e : entries_) {
       e = EntryStats{};
     }
@@ -33,13 +33,13 @@ class Profiler {
     active_ = false;
   }
 
-  auto start() noexcept -> void {
+  auto Start() noexcept -> void {
     has_checkpoint_.fill(false);
     active_ = true;
     start_time_ = Clock::now();
   }
 
-  auto end() noexcept -> void {
+  auto End() noexcept -> void {
     if (!active_) [[unlikely]] {
       return;
     }
@@ -48,7 +48,7 @@ class Profiler {
       if (!has_checkpoint_[i]) continue;
       const Duration dt = checkpoints_[i] - start_time_;
       const auto ticks = dt.count();
-      const long double ns = static_cast<long double>(ticks) * tick_to_ns_;
+      const long double ns = static_cast<long double>(ticks) * kTickToNs;
       auto& e = entries_[i];
       if (!e.has_value) {
         e.min_ns = ns;
@@ -68,14 +68,14 @@ class Profiler {
     active_ = false;
   }
 
-  template <std::size_t index>
-    requires(index < MaxEntries)
-  auto check() noexcept -> void {
-    checkpoints_[index] = Clock::now();
-    has_checkpoint_[index] = true;
+  template <std::size_t Index>
+    requires(Index < MaxEntries)
+  auto Check() noexcept -> void {
+    checkpoints_[Index] = Clock::now();
+    has_checkpoint_[Index] = true;
   }
 
-  auto show(std::ostream& os = std::cout) const -> void {
+  auto Show(std::ostream& os = std::cout) const -> void {
     os << "==== Profiler Result ====\n";
     os << "Runs: " << run_count_ << "\n";
 

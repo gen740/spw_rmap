@@ -10,7 +10,6 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <memory>
 #include <numeric>
 #include <optional>
 #include <random>
@@ -18,7 +17,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <thread>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -51,14 +49,14 @@ struct Options {
   std::optional<std::string> out_path;
 };
 
-void printUsage(const char* program) {
+void PrintUsage(const char* program) {
   std::cerr << "Usage: " << program << '\n'
             << "  --ip <addr> --port <port> --target-address <bytes...>\n"
             << "  --reply-address <bytes...> --ntimes <count> --nbytes <size>\n"
             << "  --start_address <addr>\n";
 }
 
-auto parseUnsigned(std::string_view token, unsigned long long max_value)
+auto ParseUnsigned(std::string_view token, unsigned long long max_value)
     -> std::optional<unsigned long long> {
   try {
     std::string temp(token);
@@ -73,7 +71,7 @@ auto parseUnsigned(std::string_view token, unsigned long long max_value)
   }
 }
 
-auto parseByteSequence(int argc, char** argv, int& index,
+auto ParseByteSequence(int argc, char** argv, int& index,
                        std::vector<uint8_t>& dst, std::string_view option)
     -> bool {
   bool parsed = false;
@@ -83,7 +81,7 @@ auto parseByteSequence(int argc, char** argv, int& index,
       break;
     }
     ++index;
-    auto value = parseUnsigned(next, 0xFF);
+    auto value = ParseUnsigned(next, 0xFF);
     if (!value.has_value()) {
       std::cerr << "Invalid value for --" << option << ": '" << next << "'\n";
       return false;
@@ -97,7 +95,7 @@ auto parseByteSequence(int argc, char** argv, int& index,
   return parsed;
 }
 
-auto parseOptions(int argc, char** argv) -> std::optional<Options> {
+auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
   Options opts{};
 
   for (int i = 1; i < argc; ++i) {
@@ -108,7 +106,7 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
     }
     auto name = arg.substr(2);
 
-    auto takeValue = [&](std::string_view opt) -> std::optional<std::string> {
+    auto take_value = [&](std::string_view opt) -> std::optional<std::string> {
       if (i + 1 >= argc) {
         std::cerr << "--" << opt << " requires a value.\n";
         return std::nullopt;
@@ -117,29 +115,29 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
     };
 
     if (name == "ip") {
-      if (auto v = takeValue(name)) {
+      if (auto v = take_value(name)) {
         opts.ip = std::move(*v);
       } else {
         return std::nullopt;
       }
     } else if (name == "port") {
-      if (auto v = takeValue(name)) {
+      if (auto v = take_value(name)) {
         opts.port = std::move(*v);
       } else {
         return std::nullopt;
       }
     } else if (name == "target-address") {
-      if (!parseByteSequence(argc, argv, i, opts.target_address, name)) {
+      if (!ParseByteSequence(argc, argv, i, opts.target_address, name)) {
         return std::nullopt;
       }
     } else if (name == "reply-address") {
-      if (!parseByteSequence(argc, argv, i, opts.reply_address, name)) {
+      if (!ParseByteSequence(argc, argv, i, opts.reply_address, name)) {
         return std::nullopt;
       }
     } else if (name == "ntimes") {
-      if (auto v = takeValue(name)) {
+      if (auto v = take_value(name)) {
         auto parsed =
-            parseUnsigned(*v, std::numeric_limits<std::size_t>::max());
+            ParseUnsigned(*v, std::numeric_limits<std::size_t>::max());
         if (!parsed.has_value() || *parsed == 0) {
           std::cerr << "Invalid --ntimes: '" << *v << "'\n";
           return std::nullopt;
@@ -149,9 +147,9 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
         return std::nullopt;
       }
     } else if (name == "nbytes") {
-      if (auto v = takeValue(name)) {
+      if (auto v = take_value(name)) {
         auto parsed =
-            parseUnsigned(*v, std::numeric_limits<std::size_t>::max());
+            ParseUnsigned(*v, std::numeric_limits<std::size_t>::max());
         if (!parsed.has_value() || *parsed == 0 ||
             *parsed > std::numeric_limits<uint32_t>::max()) {
           std::cerr << "--nbytes must be within [1, 0xFFFFFFFF].\n";
@@ -162,8 +160,8 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
         return std::nullopt;
       }
     } else if (name == "start_address") {
-      if (auto v = takeValue(name)) {
-        auto parsed = parseUnsigned(*v, std::numeric_limits<uint32_t>::max());
+      if (auto v = take_value(name)) {
+        auto parsed = ParseUnsigned(*v, std::numeric_limits<uint32_t>::max());
         if (!parsed.has_value()) {
           std::cerr << "Invalid --start_address: '" << *v << "'\n";
           return std::nullopt;
@@ -173,13 +171,13 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
         return std::nullopt;
       }
     } else if (name == "out") {
-      if (auto v = takeValue(name)) {
+      if (auto v = take_value(name)) {
         opts.out_path = std::move(*v);
       } else {
         return std::nullopt;
       }
     } else if (name == "help") {
-      printUsage(argv[0]);
+      PrintUsage(argv[0]);
       std::exit(0);
     } else {
       std::cerr << "Unknown option: --" << name << "\n";
@@ -211,7 +209,7 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
   return opts;
 }
 
-auto computeMean(const std::vector<double>& xs) -> double {
+auto ComputeMean(const std::vector<double>& xs) -> double {
   if (xs.empty()) {
     return 0.0;
   }
@@ -219,7 +217,7 @@ auto computeMean(const std::vector<double>& xs) -> double {
   return sum / static_cast<double>(xs.size());
 }
 
-auto computeStd(const std::vector<double>& xs, double mean) -> double {
+auto ComputeStd(const std::vector<double>& xs, double mean) -> double {
   if (xs.size() <= 1) {
     return 0.0;
   }
@@ -231,7 +229,7 @@ auto computeStd(const std::vector<double>& xs, double mean) -> double {
   return std::sqrt(acc / static_cast<double>(xs.size()));
 }
 
-auto medianSorted(const std::vector<double>& xs) -> double {
+auto MedianSorted(const std::vector<double>& xs) -> double {
   if (xs.empty()) {
     return 0.0;
   }
@@ -242,7 +240,7 @@ auto medianSorted(const std::vector<double>& xs) -> double {
   return 0.5 * (xs[n / 2 - 1] + xs[n / 2]);
 }
 
-auto computeQuartiles(std::vector<double> xs)
+auto ComputeQuartiles(std::vector<double> xs)
     -> std::tuple<double, double, double, double, double> {
   if (xs.empty()) {
     return {0.0, 0.0, 0.0, 0.0, 0.0};
@@ -251,7 +249,7 @@ auto computeQuartiles(std::vector<double> xs)
   const long n = static_cast<long>(xs.size());
   const double min_v = xs.front();
   const double max_v = xs.back();
-  const double median = medianSorted(xs);
+  const double median = MedianSorted(xs);
 
   const long mid = n / 2;
   std::vector<double> lower(xs.begin(), xs.begin() + mid);
@@ -261,16 +259,16 @@ auto computeQuartiles(std::vector<double> xs)
   } else {
     upper.assign(xs.begin() + mid + 1, xs.end());
   }
-  const double q1 = lower.empty() ? min_v : medianSorted(lower);
-  const double q3 = upper.empty() ? max_v : medianSorted(upper);
+  const double q1 = lower.empty() ? min_v : MedianSorted(lower);
+  const double q3 = upper.empty() ? max_v : MedianSorted(upper);
   return {min_v, q1, median, q3, max_v};
 }
 
-auto toMicroseconds(double value) -> long long {
+auto ToMicroseconds(double value) -> long long {
   return static_cast<long long>(std::llround(value));
 }
 
-void trySetHighestPriority() {
+void TrySetHighestPriority() {
 #if defined(__linux__)
   {
     sched_param sp{};
@@ -320,14 +318,14 @@ void trySetHighestPriority() {
 }  // namespace
 
 auto main(int argc, char** argv) -> int {
-  auto options = parseOptions(argc, argv);
+  auto options = ParseOptions(argc, argv);
   if (!options) {
-    printUsage(argv[0]);
+    PrintUsage(argv[0]);
     return 1;
   }
   auto opts = std::move(*options);
 
-  trySetHighestPriority();
+  TrySetHighestPriority();
 
   std::ofstream out_file;
   if (opts.out_path) {
@@ -360,29 +358,29 @@ auto main(int argc, char** argv) -> int {
 
   auto client =
       spw_rmap::SpwRmapTCPClient({.ip_address = opts.ip, .port = opts.port});
-  client.setInitiatorLogicalAddress(kInitiatorLogicalAddress);
-  client.setAutoPollingMode(true);
+  client.SetInitiatorLogicalAddress(kInitiatorLogicalAddress);
+  client.SetAutoPollingMode(true);
 
-  auto connect_res = client.connect(1s);
+  auto connect_res = client.Connect(1s);
   if (!connect_res.has_value()) {
     std::cerr << "Failed to connect: " << connect_res.error().message() << "\n";
     return 1;
   }
 
   auto target = spw_rmap::TargetNode(kTargetLogicalAddress)
-                    .setTargetAddress(std::move(opts.target_address))
-                    .setReplyAddress(std::move(opts.reply_address));
+                    .SetTargetAddress(std::move(opts.target_address))
+                    .SetReplyAddress(std::move(opts.reply_address));
 
   // Initial write of the pattern into the device memory.
   for (std::size_t offset = 0; offset < total_bytes; offset += kChunkSize) {
     const std::size_t chunk = std::min(kChunkSize, total_bytes - offset);
     std::span<const uint8_t> chunk_span(pattern.data() + offset, chunk);
-    auto res = client.write(
+    auto res = client.Write(
         target, base_address + static_cast<uint32_t>(offset), chunk_span);
     if (!res.has_value()) {
       std::cerr << "Write failed at offset " << offset << ": "
                 << res.error().message() << "\n";
-      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
@@ -397,11 +395,11 @@ auto main(int argc, char** argv) -> int {
   for (std::size_t iter = 0; iter < 20000; ++iter) {
     std::vector<uint8_t> warmup_buffer{};
     warmup_buffer.resize(4);
-    auto res = client.read(target, base_address, warmup_buffer);
+    auto res = client.Read(target, base_address, warmup_buffer);
     if (!res.has_value()) {
       std::cerr << "Warm-up read failed during iteration " << (iter + 1) << ": "
                 << res.error().message() << "\n";
-      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
@@ -411,12 +409,12 @@ auto main(int argc, char** argv) -> int {
 
   for (std::size_t iter = 0; iter < ntimes; ++iter) {
     const auto start_time = Clock::now();
-    auto res = client.read(target, base_address, std::span(read_buffer));
+    auto res = client.Read(target, base_address, std::span(read_buffer));
     const auto end_time = Clock::now();
     if (!res.has_value()) {
       std::cerr << "Read failed during iteration " << (iter + 1) << ": "
                 << res.error().message() << "\n";
-      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
@@ -426,7 +424,7 @@ auto main(int argc, char** argv) -> int {
     if (!std::ranges::equal(read_buffer, pattern)) {
       std::cerr << "Data mismatch detected during iteration " << (iter + 1)
                 << "\n";
-      if (auto shutdown_res = client.shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
@@ -445,21 +443,21 @@ auto main(int argc, char** argv) -> int {
     }
   }
 
-  auto mean = computeMean(latencies_ns);
-  auto stddev = computeStd(latencies_ns, mean);
-  auto [min_v, q1, median, q3, max_v] = computeQuartiles(latencies_ns);
+  auto mean = ComputeMean(latencies_ns);
+  auto stddev = ComputeStd(latencies_ns, mean);
+  auto [min_v, q1, median, q3, max_v] = ComputeQuartiles(latencies_ns);
 
-  std::cout << "mean=" << toMicroseconds(mean)
-            << " std=" << toMicroseconds(stddev)
-            << " min=" << toMicroseconds(min_v) << " q1=" << toMicroseconds(q1)
-            << " median=" << toMicroseconds(median)
-            << " q3=" << toMicroseconds(q3) << " max=" << toMicroseconds(max_v)
+  std::cout << "mean=" << ToMicroseconds(mean)
+            << " std=" << ToMicroseconds(stddev)
+            << " min=" << ToMicroseconds(min_v) << " q1=" << ToMicroseconds(q1)
+            << " median=" << ToMicroseconds(median)
+            << " q3=" << ToMicroseconds(q3) << " max=" << ToMicroseconds(max_v)
             << '\n';
 
   std::cerr << "Test completed successfully with " << ntimes
             << " iterations.\n";
 
-  auto shutdown_res = client.shutdown();
+  auto shutdown_res = client.Shutdown();
   if (!shutdown_res.has_value()) {
     std::cerr << "Shutdown error: " << shutdown_res.error().message() << "\n";
     return 1;

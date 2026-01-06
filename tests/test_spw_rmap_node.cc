@@ -7,7 +7,6 @@
 #include <condition_variable>
 #include <deque>
 #include <expected>
-#include <memory>
 #include <mutex>
 #include <span>
 #include <vector>
@@ -23,37 +22,37 @@ class MockBackend {
   MockBackend(std::string ip, std::string port)
       : ip_address_(std::move(ip)), port_(std::move(port)) {}
 
-  [[nodiscard]] auto getIpAddress() const noexcept -> const std::string& {
+  [[nodiscard]] auto GetIpAddress() const noexcept -> const std::string& {
     return ip_address_;
   }
 
-  auto setIpAddress(std::string ip_address) noexcept -> void {
+  auto SetIpAddress(std::string ip_address) noexcept -> void {
     ip_address_ = std::move(ip_address);
   }
 
-  [[nodiscard]] auto getPort() const noexcept -> const std::string& {
+  [[nodiscard]] auto GetPort() const noexcept -> const std::string& {
     return port_;
   }
 
-  auto setPort(std::string port) noexcept -> void { port_ = std::move(port); }
+  auto SetPort(std::string port) noexcept -> void { port_ = std::move(port); }
 
-  auto setSendTimeout(std::chrono::microseconds /*timeout*/) noexcept
+  auto SetSendTimeout(std::chrono::microseconds /*timeout*/) noexcept
       -> std::expected<void, std::error_code> {
     return {};
   }
 
-  auto setReceiveTimeout(std::chrono::microseconds /*timeout*/) noexcept
+  auto SetReceiveTimeout(std::chrono::microseconds /*timeout*/) noexcept
       -> std::expected<void, std::error_code> {
     return {};
   }
 
-  auto sendAll(std::span<const uint8_t> data) noexcept
+  auto SendAll(std::span<const uint8_t> data) noexcept
       -> std::expected<void, std::error_code> {
     sent_frames_.emplace_back(data.begin(), data.end());
     return {};
   }
 
-  auto recvSome(std::span<uint8_t> buffer) noexcept
+  auto RecvSome(std::span<uint8_t> buffer) noexcept
       -> std::expected<std::size_t, std::error_code> {
     if (buffer.empty()) {
       return 0U;
@@ -74,7 +73,7 @@ class MockBackend {
     return count;
   }
 
-  auto shutdown() noexcept -> std::expected<void, std::error_code> {
+  auto Shutdown() noexcept -> std::expected<void, std::error_code> {
     {
       std::lock_guard<std::mutex> lock(mtx_);
       shutdown_ = true;
@@ -83,21 +82,21 @@ class MockBackend {
     return {};
   }
 
-  [[nodiscard]] auto isShutdown() const noexcept -> bool { return shutdown_; }
+  [[nodiscard]] auto IsShutdown() const noexcept -> bool { return shutdown_; }
 
-  auto connect(std::chrono::microseconds /*timeout*/) noexcept
+  auto Connect(std::chrono::microseconds /*timeout*/) noexcept
       -> std::expected<void, std::error_code> {
     return {};
   }
 
-  auto ensureConnect() noexcept -> std::expected<void, std::error_code> {
+  auto EnsureConnect() noexcept -> std::expected<void, std::error_code> {
     if (shutdown_) {
       shutdown_ = false;
     }
     return {};
   }
 
-  void enqueueIncoming(const std::vector<uint8_t>& data) {
+  void EnqueueIncoming(const std::vector<uint8_t>& data) {
     {
       std::lock_guard<std::mutex> lock(mtx_);
       for (auto byte : data) {
@@ -107,7 +106,7 @@ class MockBackend {
     cv_.notify_all();
   }
 
-  [[nodiscard]] auto sent_frames() const
+  [[nodiscard]] auto SentFrames() const
       -> const std::vector<std::vector<uint8_t>>& {
     return sent_frames_;
   }
@@ -126,28 +125,33 @@ class TestNode : public spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend> {
   using Base = spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend>;
 
  public:
+  TestNode(const TestNode&) = delete;
+  TestNode(TestNode&&) = delete;
+  auto operator=(const TestNode&) -> TestNode& = delete;
+  auto operator=(TestNode&&) -> TestNode& = delete;
   explicit TestNode(spw_rmap::SpwRmapTCPNodeConfig config)
       : Base(std::move(config)) {}
+  ~TestNode() override = default;
 
-  void enqueueIncoming(const std::vector<uint8_t>& frame) {
-    backend().enqueueIncoming(frame);
+  void EnqueueIncoming(const std::vector<uint8_t>& frame) {
+    Backend().EnqueueIncoming(frame);
   }
 
-  auto shutdown() noexcept -> std::expected<void, std::error_code> override {
-    return backend().shutdown();
+  auto Shutdown() noexcept -> std::expected<void, std::error_code> override {
+    return Backend().Shutdown();
   }
 
-  auto isShutdowned() noexcept -> bool override {
-    return backend().isShutdown();
+  auto IsShutdowned() noexcept -> bool override {
+    return Backend().IsShutdown();
   }
 
  private:
-  using Base::getBackend_;
+  using Base::GetBackend;
 
-  auto backend() -> MockBackend& { return *getBackend_(); }
+  auto Backend() -> MockBackend& { return *GetBackend(); }
 };
 
-auto makeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
+auto MakeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
   std::vector<uint8_t> frame(12 + payload.size());
   frame[0] = 0x00;
   frame[1] = 0x00;
@@ -166,23 +170,23 @@ auto makeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
   return frame;
 }
 
-auto buildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
+auto BuildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
   auto reply_addr = std::array<uint8_t, 1>{0x01};
   auto config = spw_rmap::WriteReplyPacketConfig{
       .reply_spw_address = reply_addr,
       .initiator_logical_address = 0x34,
       .target_logical_address = 0xFE,
       .transaction_id = transaction_id,
-      .status = spw_rmap::PacketStatusCode::CommandExecutedSuccessfully,
+      .status = spw_rmap::PacketStatusCode::kCommandExecutedSuccessfully,
       .increment_mode = true,
       .verify_mode = true,
   };
   std::vector<uint8_t> payload(config.ExpectedSize());
   EXPECT_TRUE(spw_rmap::BuildWriteReplyPacket(config, payload).has_value());
-  return makeFrame(payload);
+  return MakeFrame(payload);
 }
 
-auto makeNodeConfig() -> spw_rmap::SpwRmapTCPNodeConfig {
+auto MakeNodeConfig() -> spw_rmap::SpwRmapTCPNodeConfig {
   spw_rmap::SpwRmapTCPNodeConfig config;
   config.ip_address = "127.0.0.1";
   config.port = "10030";
@@ -192,48 +196,48 @@ auto makeNodeConfig() -> spw_rmap::SpwRmapTCPNodeConfig {
 }
 
 TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
-  TestNode node(makeNodeConfig());
+  TestNode node(MakeNodeConfig());
   auto target_node = spw_rmap::TargetNode(0x34)
-                         .setTargetAddress(0x20, 0x30)
-                         .setReplyAddress(0x10, 0x11);
+                         .SetTargetAddress(0x20, 0x30)
+                         .SetReplyAddress(0x10, 0x11);
 
   std::array<uint8_t, 4> payload{0xAA, 0xBB, 0xCC, 0xDD};
   std::atomic<bool> callback_called{false};
 
-  auto write_res = node.writeAsync(
+  auto write_res = node.WriteAsync(
       target_node, 0x1000, payload,
       [&callback_called](
           std::expected<spw_rmap::Packet, std::error_code> packet) -> void {
         callback_called = true;
         EXPECT_TRUE(packet.has_value());
-        EXPECT_EQ(packet.value().type, spw_rmap::PacketType::WriteReply);
+        EXPECT_EQ(packet.value().type, spw_rmap::PacketType::kWriteReply);
       });
 
   ASSERT_TRUE(write_res.has_value());
   auto transaction_id = write_res.value();
 
-  node.enqueueIncoming(buildWriteReplyFrame(transaction_id));
+  node.EnqueueIncoming(BuildWriteReplyFrame(transaction_id));
 
-  auto poll_result = node.poll();
+  auto poll_result = node.Poll();
   ASSERT_TRUE(poll_result.has_value());
 
   EXPECT_TRUE(callback_called.load());
 }
 
 TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
-  TestNode node(makeNodeConfig());
+  TestNode node(MakeNodeConfig());
   auto target_node = spw_rmap::TargetNode(0x34)
-                         .setTargetAddress(0x20, 0x30)
-                         .setReplyAddress(0x10, 0x11);
+                         .SetTargetAddress(0x20, 0x30)
+                         .SetReplyAddress(0x10, 0x11);
   std::array<uint8_t, 2> payload{0x01, 0x02};
 
   auto timeout_result =
-      node.write(target_node, 0x2000, payload, std::chrono::milliseconds(1));
+      node.Write(target_node, 0x2000, payload, std::chrono::milliseconds(1));
   ASSERT_FALSE(timeout_result.has_value());
   EXPECT_EQ(timeout_result.error(), std::make_error_code(std::errc::timed_out));
 
   std::atomic<bool> callback_called{false};
-  auto write_res = node.writeAsync(
+  auto write_res = node.WriteAsync(
       target_node, 0x2000, payload,
       [&callback_called](std::expected<spw_rmap::Packet, std::error_code>)
           -> void { callback_called = true; });
@@ -241,9 +245,9 @@ TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
   ASSERT_TRUE(write_res.has_value());
   auto transaction_id = write_res.value();
 
-  node.enqueueIncoming(buildWriteReplyFrame(transaction_id));
+  node.EnqueueIncoming(BuildWriteReplyFrame(transaction_id));
 
-  auto poll_result = node.poll();
+  auto poll_result = node.Poll();
   ASSERT_TRUE(poll_result.has_value());
 
   EXPECT_TRUE(callback_called.load());

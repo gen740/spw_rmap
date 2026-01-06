@@ -3,7 +3,7 @@
 #if SPW_RMAP_DEBUG
 namespace spw_rmap::debug::detail {
 
-auto runtime_flag() noexcept -> std::atomic<bool>& {
+auto RuntimeFlag() noexcept -> std::atomic<bool>& {
   static std::atomic<bool> flag{true};
   return flag;
 }

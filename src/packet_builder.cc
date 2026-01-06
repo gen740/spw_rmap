@@ -15,7 +15,7 @@ auto BuildReadPacket(const ReadPacketConfig& config,
                      std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
-    spw_rmap::debug::debug("ReadPacketBuilder::build: Buffer too small");
+    spw_rmap::debug::Debug("ReadPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
   auto head = 0;
@@ -23,13 +23,13 @@ auto BuildReadPacket(const ReadPacketConfig& config,
     out[head++] = byte;
   }
   out[head++] = (config.target_logical_address);
-  out[head++] = (RMAPProtocolIdentifier);
+  out[head++] = (kRmapProtocolIdentifier);
   auto reply_address_size = config.reply_address.size();
   uint8_t instruction = 0;
-  instruction |= std::to_underlying(RMAPPacketType::Command);
-  instruction |= std::to_underlying(RMAPCommandCode::Reply);
+  instruction |= std::to_underlying(RMAPPacketType::kCommand);
+  instruction |= std::to_underlying(RMAPCommandCode::kReply);
   if (config.increment_mode) {
-    instruction |= std::to_underlying(RMAPCommandCode::IncrementAddress);
+    instruction |= std::to_underlying(RMAPCommandCode::kIncrementAddress);
   }
   if (reply_address_size != 0) {
     assert(reply_address_size <= 12);
@@ -69,7 +69,7 @@ auto BuildWritePacket(const WritePacketConfig& config,
                       std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
-    spw_rmap::debug::debug("WritePacketBuilder::build: Buffer too small");
+    spw_rmap::debug::Debug("WritePacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
   auto head = 0;
@@ -77,20 +77,21 @@ auto BuildWritePacket(const WritePacketConfig& config,
     out[head++] = (byte);
   }
   out[head++] = (config.target_logical_address);
-  out[head++] = (RMAPProtocolIdentifier);
+  out[head++] = (kRmapProtocolIdentifier);
   auto reply_address_size = config.reply_address.size();
   {  // Instruction field
     uint8_t instruction = 0;
-    instruction |= std::to_underlying(RMAPPacketType::Command);
-    instruction |= (std::to_underlying(RMAPCommandCode::Write));
+    instruction |= std::to_underlying(RMAPPacketType::kCommand);
+    instruction |= (std::to_underlying(RMAPCommandCode::kWrite));
     if (config.reply) {
-      instruction |= std::to_underlying(RMAPCommandCode::Reply);
+      instruction |= std::to_underlying(RMAPCommandCode::kReply);
     }
     if (config.verify_mode) {
-      instruction |= std::to_underlying(RMAPCommandCode::VerifyDataBeforeWrite);
+      instruction |=
+          std::to_underlying(RMAPCommandCode::kVerifyDataBeforeWrite);
     }
     if (config.increment_mode) {
-      instruction |= std::to_underlying(RMAPCommandCode::IncrementAddress);
+      instruction |= std::to_underlying(RMAPCommandCode::kIncrementAddress);
     }
     if (reply_address_size != 0) {
       assert(reply_address_size <= 12);
@@ -142,7 +143,7 @@ auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
                           std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
-    spw_rmap::debug::debug("ReadReplyPacketBuilder::build: Buffer too small");
+    spw_rmap::debug::Debug("ReadReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
   auto head = 0;
@@ -150,13 +151,13 @@ auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
     out[head++] = (byte);
   }
   out[head++] = (config.initiator_logical_address);
-  out[head++] = (RMAPProtocolIdentifier);
+  out[head++] = (kRmapProtocolIdentifier);
   {  // Instruction field
     uint8_t instruction = 0;
-    instruction |= (std::to_underlying(RMAPPacketType::Reply));
-    instruction |= std::to_underlying(RMAPCommandCode::Reply);
+    instruction |= (std::to_underlying(RMAPPacketType::kReply));
+    instruction |= std::to_underlying(RMAPCommandCode::kReply);
     if (config.increment_mode) {
-      instruction |= std::to_underlying(RMAPCommandCode::IncrementAddress);
+      instruction |= std::to_underlying(RMAPCommandCode::kIncrementAddress);
     }
     out[head++] = (instruction);
   }
@@ -186,7 +187,7 @@ auto BuildWriteReplyPacket(const WriteReplyPacketConfig& config,
                            std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
-    spw_rmap::debug::debug("WriteReplyPacketBuilder::build: Buffer too small");
+    spw_rmap::debug::Debug("WriteReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
   auto head = 0;
@@ -197,14 +198,15 @@ auto BuildWriteReplyPacket(const WriteReplyPacketConfig& config,
   out[head++] = (0x01);  // Protocol Identifier
   {                      // Instruction field
     uint8_t instruction = 0;
-    instruction |= (std::to_underlying(RMAPPacketType::Reply));
-    instruction |= (std::to_underlying(RMAPCommandCode::Write));
-    instruction |= std::to_underlying(RMAPCommandCode::Reply);
+    instruction |= (std::to_underlying(RMAPPacketType::kReply));
+    instruction |= (std::to_underlying(RMAPCommandCode::kWrite));
+    instruction |= std::to_underlying(RMAPCommandCode::kReply);
     if (config.verify_mode) {
-      instruction |= std::to_underlying(RMAPCommandCode::VerifyDataBeforeWrite);
+      instruction |=
+          std::to_underlying(RMAPCommandCode::kVerifyDataBeforeWrite);
     }
     if (config.increment_mode) {
-      instruction |= std::to_underlying(RMAPCommandCode::IncrementAddress);
+      instruction |= std::to_underlying(RMAPCommandCode::kIncrementAddress);
     }
     out[head++] = (instruction);
   }

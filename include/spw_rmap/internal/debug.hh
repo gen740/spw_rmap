@@ -10,19 +10,19 @@
 
 namespace spw_rmap::debug {
 
-inline constexpr bool enabled = static_cast<bool>(SPW_RMAP_DEBUG);
+inline constexpr bool kEnabled = SPW_RMAP_DEBUG;
 
 #if SPW_RMAP_DEBUG
 namespace detail {
-auto runtime_flag() noexcept -> std::atomic<bool>&;
+auto RuntimeFlag() noexcept -> std::atomic<bool>&;
 }  // namespace detail
 
-inline void set_runtime_enabled(bool value) noexcept {
-  detail::runtime_flag().store(value, std::memory_order_relaxed);
+inline void SetRuntimeEnabled(bool value) noexcept {
+  detail::RuntimeFlag().store(value, std::memory_order_relaxed);
 }
 
-[[nodiscard]] inline auto is_runtime_enabled() noexcept -> bool {
-  return detail::runtime_flag().load(std::memory_order_relaxed);
+[[nodiscard]] inline auto IsRuntimeEnabled() noexcept -> bool {
+  return detail::RuntimeFlag().load(std::memory_order_relaxed);
 }
 #else
 inline void set_runtime_enabled(bool) noexcept {}
@@ -31,28 +31,28 @@ inline void set_runtime_enabled(bool) noexcept {}
 }
 #endif
 
-inline void enable() noexcept { set_runtime_enabled(true); }
-inline void disable() noexcept { set_runtime_enabled(false); }
+inline void Enable() noexcept { SetRuntimeEnabled(true); }
+inline void Disable() noexcept { SetRuntimeEnabled(false); }
 
 template <typename T>
-void debug_impl(T&& msg, const std::source_location& loc =
-                             std::source_location::current()) {
+void DebugImpl(T&& msg, const std::source_location& loc =
+                            std::source_location::current()) {
   std::cerr << loc.file_name() << " in line " << loc.line() << " in function "
             << loc.function_name() << ": " << std::forward<T>(msg) << '\n';
 }
 
 template <typename T>
-constexpr void debug(T&& msg, const std::source_location& loc =
+constexpr void Debug(T&& msg, const std::source_location& loc =
                                   std::source_location::current()) {
-  if constexpr (enabled) {
-    if (is_runtime_enabled()) {
-      debug_impl(std::forward<T>(msg), loc);
+  if constexpr (kEnabled) {
+    if (IsRuntimeEnabled()) {
+      DebugImpl(std::forward<T>(msg), loc);
     }
   }
 }
 
 template <typename T, typename Arg>
-void debug_impl(
+void DebugImpl(
     T&& msg, Arg&& value,
     const std::source_location& loc = std::source_location::current()) {
   std::cerr << loc.file_name() << " in line " << loc.line() << " in function "
@@ -61,12 +61,12 @@ void debug_impl(
 }
 
 template <typename T, typename Arg>
-constexpr void debug(
+constexpr void Debug(
     T&& msg, Arg&& value,
     const std::source_location& loc = std::source_location::current()) {
-  if constexpr (enabled) {
-    if (is_runtime_enabled()) {
-      debug_impl(std::forward<T>(msg), std::forward<Arg>(value), loc);
+  if constexpr (kEnabled) {
+    if (IsRuntimeEnabled()) {
+      DebugImpl(std::forward<T>(msg), std::forward<Arg>(value), loc);
     }
   }
 }
