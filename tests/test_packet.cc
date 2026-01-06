@@ -76,13 +76,13 @@ TEST(spw_rmap, ReadPacket) {
     }
 
     TargetNode node(RandomLogicalAddress());
-    std::ignore = node.setTargetAddress(target_address);
-    std::ignore = node.setReplyAddress(reply_address);
+    std::ignore = node.SetTargetAddress(target_address);
+    std::ignore = node.SetReplyAddress(reply_address);
 
     auto c = ReadPacketConfig{
-        .target_spw_address = node.getTargetAddress(),
-        .target_logical_address = node.getTargetLogicalAddress(),
-        .reply_address = node.getReplyAddress(),
+        .target_spw_address = node.GetTargetAddress(),
+        .target_logical_address = node.GetTargetLogicalAddress(),
+        .reply_address = node.GetReplyAddress(),
         .initiator_logical_address = RandomLogicalAddress(),
         .transaction_id =
             static_cast<uint16_t>(RandomByte() << 8 | RandomByte()),
@@ -102,16 +102,16 @@ TEST(spw_rmap, ReadPacket) {
     ASSERT_TRUE(parsed.has_value());
 
     auto d = parsed.value();
-    EXPECT_TRUE(SpanEqual(d.targetSpaceWireAddress, c.target_spw_address));
-    EXPECT_TRUE(SpanEqual(d.replyAddress, c.reply_address));
-    EXPECT_EQ(d.targetLogicalAddress, c.target_logical_address);
-    EXPECT_EQ(d.initiatorLogicalAddress, c.initiator_logical_address);
-    EXPECT_EQ(d.transactionID, c.transaction_id);
-    EXPECT_EQ(d.extendedAddress, c.extended_address);
+    EXPECT_TRUE(SpanEqual(d.target_spw_address, c.target_spw_address));
+    EXPECT_TRUE(SpanEqual(d.reply_address, c.reply_address));
+    EXPECT_EQ(d.target_logical_address, c.target_logical_address);
+    EXPECT_EQ(d.initiator_logical_address, c.initiator_logical_address);
+    EXPECT_EQ(d.transaction_id, c.transaction_id);
+    EXPECT_EQ(d.extended_address, c.extended_address);
     EXPECT_EQ(d.address, c.address);
-    EXPECT_EQ(d.dataLength, c.data_length);
+    EXPECT_EQ(d.data_length, c.data_length);
     EXPECT_EQ(d.key, c.key);
-    EXPECT_EQ(d.type, PacketType::Read);
+    EXPECT_EQ(d.type, PacketType::kRead);
     EXPECT_EQ(d.instruction & 0b00000100, c.increment_mode ? 0b00000100 : 0);
   }
 }
@@ -129,8 +129,8 @@ TEST(spw_rmap, ReadReplyPacket) {
     }
 
     TargetNode node(RandomLogicalAddress());
-    std::ignore = node.setTargetAddress(target_address);
-    std::ignore = node.setReplyAddress(reply_address);
+    std::ignore = node.SetTargetAddress(target_address);
+    std::ignore = node.SetReplyAddress(reply_address);
 
     std::vector<uint8_t> data;
 
@@ -139,8 +139,8 @@ TEST(spw_rmap, ReadReplyPacket) {
     }
 
     auto c = ReadReplyPacketConfig{
-        .reply_spw_address = node.getReplyAddress(),
-        .target_logical_address = node.getTargetLogicalAddress(),
+        .reply_spw_address = node.GetReplyAddress(),
+        .target_logical_address = node.GetTargetLogicalAddress(),
         .transaction_id =
             static_cast<uint16_t>(RandomByte() << 8 | RandomByte()),
         .status = static_cast<PacketStatusCode>(RandomByte()),
@@ -157,12 +157,12 @@ TEST(spw_rmap, ReadReplyPacket) {
     ASSERT_TRUE(parsed.has_value());
 
     auto d = parsed.value();
-    EXPECT_TRUE(SpanEqual(d.replyAddress, c.reply_spw_address));
+    EXPECT_TRUE(SpanEqual(d.reply_spw_address, c.reply_spw_address));
     EXPECT_EQ(d.status, c.status);
-    EXPECT_EQ(d.targetLogicalAddress, c.target_logical_address);
-    EXPECT_EQ(d.transactionID, c.transaction_id);
+    EXPECT_EQ(d.target_logical_address, c.target_logical_address);
+    EXPECT_EQ(d.transaction_id, c.transaction_id);
     EXPECT_TRUE(SpanEqual(d.data, c.data));
-    EXPECT_EQ(d.type, PacketType::ReadReply);
+    EXPECT_EQ(d.type, PacketType::kReadReply);
     EXPECT_EQ(d.instruction & 0b00000100, c.increment_mode ? 0b00000100 : 0);
   }
 }
@@ -180,8 +180,8 @@ TEST(spw_rmap, WritePacket) {
     }
 
     TargetNode node(RandomLogicalAddress());
-    std::ignore = node.setTargetAddress(target_address);
-    std::ignore = node.setReplyAddress(reply_address);
+    std::ignore = node.SetTargetAddress(target_address);
+    std::ignore = node.SetReplyAddress(reply_address);
 
     std::vector<uint8_t> data;
 
@@ -190,9 +190,9 @@ TEST(spw_rmap, WritePacket) {
     }
 
     auto c = WritePacketConfig{
-        .target_spw_address = node.getTargetAddress(),
-        .target_logical_address = node.getTargetLogicalAddress(),
-        .reply_address = node.getReplyAddress(),
+        .target_spw_address = node.GetTargetAddress(),
+        .target_logical_address = node.GetTargetLogicalAddress(),
+        .reply_address = node.GetReplyAddress(),
         .initiator_logical_address = RandomLogicalAddress(),
         .transaction_id =
             static_cast<uint16_t>(RandomByte() << 8 | RandomByte()),
@@ -213,13 +213,13 @@ TEST(spw_rmap, WritePacket) {
     ASSERT_TRUE(parsed.has_value());
 
     auto d = parsed.value();
-    EXPECT_TRUE(SpanEqual(d.targetSpaceWireAddress, c.target_spw_address));
-    EXPECT_TRUE(SpanEqual(d.replyAddress, c.reply_address));
-    EXPECT_EQ(d.targetLogicalAddress, c.target_logical_address);
-    EXPECT_EQ(d.initiatorLogicalAddress, c.initiator_logical_address);
-    EXPECT_EQ(d.transactionID, c.transaction_id);
+    EXPECT_TRUE(SpanEqual(d.target_spw_address, c.target_spw_address));
+    EXPECT_TRUE(SpanEqual(d.reply_address, c.reply_address));
+    EXPECT_EQ(d.target_logical_address, c.target_logical_address);
+    EXPECT_EQ(d.initiator_logical_address, c.initiator_logical_address);
+    EXPECT_EQ(d.transaction_id, c.transaction_id);
     EXPECT_EQ(d.key, c.key);
-    EXPECT_EQ(d.extendedAddress, c.extended_address);
+    EXPECT_EQ(d.extended_address, c.extended_address);
     EXPECT_EQ(d.address, c.address);
     EXPECT_EQ(d.instruction & 0b00000100, c.increment_mode ? 0b00000100 : 0);
     EXPECT_TRUE(SpanEqual(d.data, c.data));
@@ -239,13 +239,13 @@ TEST(spw_rmap, WriteReplyPacket) {
     }
 
     TargetNode node(RandomLogicalAddress());
-    std::ignore = node.setTargetAddress(target_address);
-    std::ignore = node.setReplyAddress(reply_address);
+    std::ignore = node.SetTargetAddress(target_address);
+    std::ignore = node.SetReplyAddress(reply_address);
 
     auto c = WriteReplyPacketConfig{
-        .reply_spw_address = node.getReplyAddress(),
+        .reply_spw_address = node.GetReplyAddress(),
         .initiator_logical_address = RandomLogicalAddress(),
-        .target_logical_address = node.getTargetLogicalAddress(),
+        .target_logical_address = node.GetTargetLogicalAddress(),
         .transaction_id =
             static_cast<uint16_t>(RandomByte() << 8 | RandomByte()),
         .status = static_cast<PacketStatusCode>(RandomByte()),
@@ -262,12 +262,12 @@ TEST(spw_rmap, WriteReplyPacket) {
     ASSERT_TRUE(parsed.has_value());
 
     auto d = parsed.value();
-    EXPECT_TRUE(SpanEqual(d.replyAddress, c.reply_spw_address));
-    EXPECT_EQ(d.initiatorLogicalAddress, c.initiator_logical_address);
+    EXPECT_TRUE(SpanEqual(d.reply_spw_address, c.reply_spw_address));
+    EXPECT_EQ(d.initiator_logical_address, c.initiator_logical_address);
     EXPECT_EQ(d.status, c.status);
-    EXPECT_EQ(d.targetLogicalAddress, c.target_logical_address);
-    EXPECT_EQ(d.transactionID, c.transaction_id);
-    EXPECT_EQ(d.type, PacketType::WriteReply);
+    EXPECT_EQ(d.target_logical_address, c.target_logical_address);
+    EXPECT_EQ(d.transaction_id, c.transaction_id);
+    EXPECT_EQ(d.type, PacketType::kWriteReply);
     EXPECT_EQ(d.instruction & 0b00000100, c.increment_mode ? 0b00000100 : 0);
   }
 }

@@ -35,20 +35,20 @@ class PySpwRmapTCPNode {
                .port = port,
                .send_buffer_size = 4096,
                .recv_buffer_size = 4096,
-               .buffer_policy = spw_rmap::BufferPolicy::AutoResize}) {
-    node_.setAutoPollingMode(true);
+               .buffer_policy = spw_rmap::BufferPolicy::kAutoResize}) {
+    node_.SetAutoPollingMode(true);
   }
 
   ~PySpwRmapTCPNode() = default;
 
-  auto connect(std::chrono::milliseconds timeout = 500ms) -> void {
-    auto res = node_.connect(timeout);
+  auto Connect(std::chrono::milliseconds timeout = 500ms) -> void {
+    auto res = node_.Connect(timeout);
     if (!res.has_value()) {
       throw std::system_error(res.error());
     }
   }
 
-  auto read(PyTargetNode target_node, uint32_t memory_adderss,
+  auto Read(PyTargetNode target_node, uint32_t memory_adderss,
             uint32_t data_length) -> std::vector<uint8_t> {
     std::vector<uint8_t> data(data_length);
     if (target_node.reply_address.size() >
@@ -62,16 +62,16 @@ class PySpwRmapTCPNode {
 
     auto spw_target_node =
         spw_rmap::TargetNode(target_node.logical_address)
-            .setTargetAddress(std::move(target_node.target_spacewire_address))
-            .setReplyAddress(std::move(target_node.reply_address));
-    auto res_read = node_.read(spw_target_node, memory_adderss, data, 100ms);
+            .SetTargetAddress(std::move(target_node.target_spacewire_address))
+            .SetReplyAddress(std::move(target_node.reply_address));
+    auto res_read = node_.Read(spw_target_node, memory_adderss, data, 100ms);
     if (!res_read) {
       throw std::system_error(res_read.error());
     }
     return data;
   }
 
-  void write(PyTargetNode target_node, uint32_t memory_adderss,
+  void Write(PyTargetNode target_node, uint32_t memory_adderss,
              const std::vector<uint8_t>& data) {
     if (target_node.target_spacewire_address.size() >
         spw_rmap::TargetNode::kMaxAddressLen) {
@@ -84,9 +84,9 @@ class PySpwRmapTCPNode {
 
     auto spw_target_node =
         spw_rmap::TargetNode(target_node.logical_address)
-            .setTargetAddress(std::move(target_node.target_spacewire_address))
-            .setReplyAddress(std::move(target_node.reply_address));
-    auto res_write = node_.write(spw_target_node, memory_adderss, data, 100ms);
+            .SetTargetAddress(std::move(target_node.target_spacewire_address))
+            .SetReplyAddress(std::move(target_node.reply_address));
+    auto res_write = node_.Write(spw_target_node, memory_adderss, data, 100ms);
     if (!res_write) {
       throw std::system_error(res_write.error());
     }
@@ -115,26 +115,26 @@ PYBIND11_MODULE(_core, m) {
   py::class_<PySpwRmapTCPNode>(m, "SpwRmapTCPNode")
       .def(py::init<std::string, std::string>(), py::arg("ip_address"),
            py::arg("port"))
-      .def("connect", &PySpwRmapTCPNode::connect, py::arg("timeout") = 500ms)
-      .def("read", &PySpwRmapTCPNode::read, py::arg("target_node"),
+      .def("connect", &::PySpwRmapTCPNode::Connect, py::arg("timeout") = 500ms)
+      .def("read", &PySpwRmapTCPNode::Read, py::arg("target_node"),
            py::arg("memory_address"), py::arg("data_length"))
-      .def("write", &PySpwRmapTCPNode::write, py::arg("target_node"),
+      .def("write", &PySpwRmapTCPNode::Write, py::arg("target_node"),
            py::arg("memory_address"), py::arg("data"));
 
   m.def(
       "set_debug_enabled",
       [](bool enabled) -> void {
-        spw_rmap::debug::set_runtime_enabled(enabled);
+        spw_rmap::debug::SetRuntimeEnabled(enabled);
       },
       py::arg("enabled"), "Enable or disable runtime debug logging");
   m.def(
-      "enable_debug", []() -> void { spw_rmap::debug::enable(); },
+      "enable_debug", []() -> void { spw_rmap::debug::Enable(); },
       "Enable runtime debug logging");
   m.def(
-      "disable_debug", []() -> void { spw_rmap::debug::disable(); },
+      "disable_debug", []() -> void { spw_rmap::debug::Disable(); },
       "Disable runtime debug logging");
   m.def(
       "is_debug_enabled",
-      []() -> bool { return spw_rmap::debug::is_runtime_enabled(); },
+      []() -> bool { return spw_rmap::debug::IsRuntimeEnabled(); },
       "Check if runtime debug logging is enabled");
 }

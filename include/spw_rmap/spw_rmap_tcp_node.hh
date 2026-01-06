@@ -17,49 +17,50 @@ using namespace std::chrono_literals;
 
 class SpwRmapTCPClient
     : public internal::SpwRmapTCPNodeImpl<internal::TCPClient> {
- public:
-  using SpwRmapTCPNodeImpl::SpwRmapTCPNodeImpl;
-
+ private:
   std::mutex shutdown_mtx_;
   bool shutdowned_ = false;
 
-  auto connect(std::chrono::microseconds connect_timeout = 100ms)
+ public:
+  using SpwRmapTCPNodeImpl::SpwRmapTCPNodeImpl;
+
+  auto Connect(std::chrono::microseconds connect_timeout = 100ms)
       -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
-    auto res = getBackend_()->connect(connect_timeout);
+    auto res = GetBackend()->Connect(connect_timeout);
     shutdowned_ = false;
     if (!res.has_value()) {
-      getBackend_()->disconnect();
+      GetBackend()->Disconnect();
       return std::unexpected{res.error()};
     }
-    auto timeout_res = getBackend_()->setSendTimeout(getSendTimeout_());
+    auto timeout_res = GetBackend()->SetSendTimeout(GetSendTimeout());
     if (!timeout_res.has_value()) {
-      getBackend_()->disconnect();
+      GetBackend()->Disconnect();
       return std::unexpected{timeout_res.error()};
     }
     return {};
   }
 
-  auto setSendTimeout(std::chrono::microseconds timeout) noexcept
+  auto SetSendTimeout(std::chrono::microseconds timeout) noexcept
       -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
-    return setSendTimeoutInternal_(timeout);
+    return SetSendTimeoutInternal(timeout);
   }
 
-  auto shutdown() noexcept -> std::expected<void, std::error_code> override {
+  auto Shutdown() noexcept -> std::expected<void, std::error_code> override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
-    if (getBackend_()) {
-      auto res = getBackend_()->shutdown();
+    if (GetBackend()) {
+      auto res = GetBackend()->Shutdown();
       shutdowned_ = true;
       if (!res.has_value()) {
         return std::unexpected{res.error()};
       }
-      getBackend_() = nullptr;
+      GetBackend() = nullptr;
     }
     return {};
   }
 
-  auto isShutdowned() noexcept -> bool override {
+  auto IsShutdowned() noexcept -> bool override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     return shutdowned_;
   }
@@ -67,26 +68,27 @@ class SpwRmapTCPClient
 
 class SpwRmapTCPServer
     : public internal::SpwRmapTCPNodeImpl<internal::TCPServer> {
+ private:
+  std::mutex shutdown_mtx_;
+  bool shutdowned_ = false;
+
  public:
   explicit SpwRmapTCPServer(SpwRmapTCPNodeConfig config) noexcept
       : internal::SpwRmapTCPNodeImpl<internal::TCPServer>(std::move(config)) {}
 
-  std::mutex shutdown_mtx_;
-  bool shutdowned_ = false;
-
-  auto acceptOnce() -> std::expected<void, std::error_code> {
+  auto AcceptOnce() -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
-    auto res = getBackend_()->accept_once();
+    auto res = GetBackend()->AcceptOnce();
     if (!res.has_value()) {
       std::cerr << "Failed to accept TCP connection: " << res.error().message()
                 << "\n";
       return std::unexpected{res.error()};
     }
-    auto timeout_res = getBackend_()->setSendTimeout(getSendTimeout_());
+    auto timeout_res = GetBackend()->SetSendTimeout(GetSendTimeout());
     if (!timeout_res.has_value()) {
       std::cerr << "Failed to set send timeout: "
                 << timeout_res.error().message() << "\n";
-      auto res = getBackend_()->shutdown();
+      auto res = GetBackend()->Shutdown();
       if (!res.has_value()) {
         return std::unexpected{res.error()};
       }
@@ -96,16 +98,16 @@ class SpwRmapTCPServer
     return {};
   }
 
-  auto setSendTimeout(std::chrono::microseconds timeout) noexcept
+  auto SetSendTimeout(std::chrono::microseconds timeout) noexcept
       -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
-    return setSendTimeoutInternal_(timeout);
+    return SetSendTimeoutInternal(timeout);
   }
 
-  auto shutdown() noexcept -> std::expected<void, std::error_code> override {
+  auto Shutdown() noexcept -> std::expected<void, std::error_code> override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
-    if (getBackend_()) {
-      auto res = getBackend_()->shutdown();
+    if (GetBackend()) {
+      auto res = GetBackend()->Shutdown();
       shutdowned_ = true;
       if (!res.has_value()) {
         return std::unexpected{res.error()};
@@ -114,7 +116,7 @@ class SpwRmapTCPServer
     return {};
   }
 
-  auto isShutdowned() noexcept -> bool override {
+  auto IsShutdowned() noexcept -> bool override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
     return shutdowned_;
   }

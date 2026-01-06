@@ -6,7 +6,6 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
-#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -35,7 +34,7 @@ struct Options {
 constexpr uint8_t kInitiatorLogicalAddress = 0xFE;
 constexpr uint8_t kTargetLogicalAddress = 0xFE;
 
-void printUsage(const char* program) {
+void PrintUsage(const char* program) {
   std::cerr
       << "Usage: " << program
       << " --type <read|write> --ip <addr> --port <port>\n"
@@ -50,7 +49,7 @@ void printUsage(const char* program) {
       << "           --address 0x44a2006C --data 0x32 0x42 0x18 0x34\n";
 }
 
-auto parseUnsigned(std::string_view token, unsigned long long max_value)
+auto ParseUnsigned(std::string_view token, unsigned long long max_value)
     -> std::optional<unsigned long long> {
   try {
     std::string value_str(token);
@@ -65,7 +64,7 @@ auto parseUnsigned(std::string_view token, unsigned long long max_value)
   }
 }
 
-auto parseByteSequence(int argc, char** argv, int& index,
+auto ParseByteSequence(int argc, char** argv, int& index,
                        std::string_view option_name,
                        std::vector<uint8_t>& destination) -> bool {
   bool parsed = false;
@@ -75,7 +74,7 @@ auto parseByteSequence(int argc, char** argv, int& index,
       break;
     }
     ++index;
-    auto value = parseUnsigned(next, 0xFF);
+    auto value = ParseUnsigned(next, 0xFF);
     if (!value.has_value()) {
       std::cerr << "Invalid value for --" << option_name << ": '" << next
                 << "'\n";
@@ -90,7 +89,7 @@ auto parseByteSequence(int argc, char** argv, int& index,
   return parsed;
 }
 
-auto parseOptions(int argc, char** argv) -> std::optional<Options> {
+auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
   Options opts{};
 
   for (int i = 1; i < argc; ++i) {
@@ -101,7 +100,7 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
     }
     const auto name = arg.substr(2);
 
-    auto takeValue =
+    auto take_value =
         [&](std::string_view option) -> std::optional<std::string> {
       if (i + 1 >= argc) {
         std::cerr << "--" << option << " requires a value.\n";
@@ -111,59 +110,60 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
     };
 
     if (name == "ip") {
-      auto value = takeValue(name);
+      auto value = take_value(name);
       if (!value) {
         return std::nullopt;
       }
       opts.ip = std::move(*value);
     } else if (name == "port") {
-      auto value = takeValue(name);
+      auto value = take_value(name);
       if (!value) {
         return std::nullopt;
       }
       opts.port = std::move(*value);
     } else if (name == "type") {
-      auto value = takeValue(name);
+      auto value = take_value(name);
       if (!value) {
         return std::nullopt;
       }
       opts.type = std::move(*value);
-      std::transform(
-          opts.type.begin(), opts.type.end(), opts.type.begin(),
-          [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
+      std::ranges::transform(opts.type, opts.type.begin(),
+                             [](unsigned char ch) -> char {
+                               return static_cast<char>(std::tolower(ch));
+                             });
     } else if (name == "target-address") {
-      if (!parseByteSequence(argc, argv, i, name, opts.target_address)) {
+      if (!ParseByteSequence(argc, argv, i, name, opts.target_address)) {
         return std::nullopt;
       }
     } else if (name == "reply-address") {
-      if (!parseByteSequence(argc, argv, i, name, opts.reply_address)) {
+      if (!ParseByteSequence(argc, argv, i, name, opts.reply_address)) {
         return std::nullopt;
       }
     } else if (name == "address") {
-      auto value = takeValue(name);
+      auto value = take_value(name);
       if (!value) {
         return std::nullopt;
       }
-      auto parsed = parseUnsigned(*value, std::numeric_limits<uint32_t>::max());
+      auto parsed = ParseUnsigned(*value, std::numeric_limits<uint32_t>::max());
       if (!parsed.has_value()) {
         std::cerr << "Invalid --address: '" << *value << "'\n";
         return std::nullopt;
       }
       opts.address = static_cast<uint32_t>(*parsed);
     } else if (name == "length") {
-      auto value = takeValue(name);
+      auto value = take_value(name);
       if (!value) {
         return std::nullopt;
       }
       auto parsed =
-          parseUnsigned(*value, std::numeric_limits<std::size_t>::max());
+          ParseUnsigned(*value, std::numeric_limits<std::size_t>::max());
       if (!parsed.has_value() || *parsed == 0) {
         std::cerr << "Invalid --length: '" << *value << "'\n";
         return std::nullopt;
       }
       opts.length = static_cast<std::size_t>(*parsed);
     } else if (name == "data") {
-      if (!parseByteSequence(argc, argv, i, name, opts.data)) {
+      if (!ParseByteSequence(argc, argv, i, name, opts.data)) {
         return std::nullopt;
       }
     } else {
@@ -200,10 +200,10 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
   return opts;
 }
 
-auto performRead(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
+auto PerformRead(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
                  const spw_rmap::TargetNode& target) -> bool {
   std::vector<uint8_t> buffer(*opts.length);
-  auto res = client.read(target, *opts.address, buffer);
+  auto res = client.Read(target, *opts.address, buffer);
   if (!res.has_value()) {
     std::cerr << "Read failed: " << res.error().message() << "\n";
     return false;
@@ -217,9 +217,9 @@ auto performRead(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
   return true;
 }
 
-auto performWrite(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
+auto PerformWrite(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
                   const spw_rmap::TargetNode& target) -> bool {
-  auto res = client.write(target, *opts.address, opts.data);
+  auto res = client.Write(target, *opts.address, opts.data);
   if (!res.has_value()) {
     std::cerr << "Write failed: " << res.error().message() << "\n";
     return false;
@@ -234,19 +234,19 @@ auto performWrite(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
 
 auto main(int argc, char** argv) -> int {
   if (argc == 1) {
-    printUsage(argv[0]);
+    PrintUsage(argv[0]);
     return 1;
   }
   for (int i = 1; i < argc; ++i) {
     if (std::string_view(argv[i]) == "--help") {
-      printUsage(argv[0]);
+      PrintUsage(argv[0]);
       return 0;
     }
   }
 
-  auto options = parseOptions(argc, argv);
+  auto options = ParseOptions(argc, argv);
   if (!options) {
-    printUsage(argv[0]);
+    PrintUsage(argv[0]);
     return 1;
   }
 
@@ -254,10 +254,10 @@ auto main(int argc, char** argv) -> int {
 
   auto client =
       spw_rmap::SpwRmapTCPClient({.ip_address = opts.ip, .port = opts.port});
-  client.setInitiatorLogicalAddress(kInitiatorLogicalAddress);
-  client.setAutoPollingMode(true);
+  client.SetInitiatorLogicalAddress(kInitiatorLogicalAddress);
+  client.SetAutoPollingMode(true);
 
-  auto connect_res = client.connect(1s);
+  auto connect_res = client.Connect(1s);
   if (!connect_res.has_value()) {
     std::cerr << "Failed to connect to " << opts.ip << ":" << opts.port << " - "
               << connect_res.error().message() << "\n";
@@ -265,13 +265,13 @@ auto main(int argc, char** argv) -> int {
   }
 
   auto target_node = spw_rmap::TargetNode(kTargetLogicalAddress)
-                         .setTargetAddress(std::move(opts.target_address))
-                         .setReplyAddress(std::move(opts.reply_address));
+                         .SetTargetAddress(std::move(opts.target_address))
+                         .SetReplyAddress(std::move(opts.reply_address));
 
-  bool success = opts.type == "read" ? performRead(opts, client, target_node)
-                                     : performWrite(opts, client, target_node);
+  bool success = opts.type == "read" ? PerformRead(opts, client, target_node)
+                                     : PerformWrite(opts, client, target_node);
 
-  auto shutdown_res = client.shutdown();
+  auto shutdown_res = client.Shutdown();
   if (!shutdown_res.has_value()) {
     std::cerr << "Shutdown error: " << shutdown_res.error().message() << "\n";
     success = false;

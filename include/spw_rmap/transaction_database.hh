@@ -33,16 +33,16 @@ class TransactionDatabase {
     }
   }
 
-  [[nodiscard]] constexpr auto contains(uint16_t transaction_id) const noexcept
+  [[nodiscard]] constexpr auto Contains(uint16_t transaction_id) const noexcept
       -> bool {
     return transaction_id >= id_min_ && transaction_id < id_max_;
   }
 
-  auto setTimeout(std::chrono::milliseconds timeout) noexcept -> void {
+  auto SetTimeout(std::chrono::milliseconds timeout) noexcept -> void {
     timeout_ = timeout;
   }
 
-  auto acquire(Callback callback = Callback{}) noexcept
+  auto Acquire(Callback callback = Callback{}) noexcept
       -> std::expected<uint16_t, std::error_code> {
     for (size_t i = 0; i < entries_.size(); ++i) {
       Callback timeout_callback = nullptr;
@@ -59,7 +59,7 @@ class TransactionDatabase {
                                (now - entry.last_used > timeout_);
         if (entry.available || timed_out) [[likely]] {
           if (!entry.available && timed_out) {
-            spw_rmap::debug::debug(
+            spw_rmap::debug::Debug(
                 "TransactionDatabase::acquire: Reusing timed-out transaction "
                 "ID ",
                 entry.transaction_id);
@@ -81,29 +81,29 @@ class TransactionDatabase {
         std::make_error_code(std::errc::resource_unavailable_try_again)};
   }
 
-  auto invokeReplyCallback(uint16_t transaction_id,
+  auto InvokeReplyCallback(uint16_t transaction_id,
                            const Packet& packet) noexcept -> bool {
     Callback callback = nullptr;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      auto* entry = getEntry_(transaction_id);
+      auto* entry = GetEntry(transaction_id);
       if (entry == nullptr || !entry->callback) {
         return false;
       }
       callback = std::move(entry->callback);
-      entry->clear();
+      entry->Clear();
     }
     callback(packet);
     return true;
   }
 
-  auto release(uint16_t transaction_id) noexcept -> void {
+  auto Release(uint16_t transaction_id) noexcept -> void {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto* entry = getEntry_(transaction_id);
+    auto* entry = GetEntry(transaction_id);
     if (entry != nullptr) [[likely]] {
-      return entry->clear();
+      return entry->Clear();
     }
-    spw_rmap::debug::debug(
+    spw_rmap::debug::Debug(
         "TransactionDatabase::release: Invalid transaction ID ",
         transaction_id);
   }
@@ -115,15 +115,15 @@ class TransactionDatabase {
         std::chrono::steady_clock::time_point::min();
     uint16_t transaction_id = 0;
     Callback callback = nullptr;
-    auto clear() noexcept -> void {
+    auto Clear() noexcept -> void {
       available = true;
       last_used = std::chrono::steady_clock::time_point::min();
       callback = nullptr;
     }
   };
 
-  auto getEntry_(uint16_t transaction_id) noexcept -> Entry* {
-    if (!contains(transaction_id)) [[unlikely]] {
+  auto GetEntry(uint16_t transaction_id) noexcept -> Entry* {
+    if (!Contains(transaction_id)) [[unlikely]] {
       return nullptr;
     }
     return &entries_[transaction_id - id_min_];
