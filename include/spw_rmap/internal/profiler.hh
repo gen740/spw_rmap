@@ -45,11 +45,11 @@ class Profiler {
     }
 
     for (std::size_t i = 0; i < MaxEntries; ++i) {
-      if (!has_checkpoint_.at(i)) continue;
-      const Duration dt = checkpoints_.at(i) - start_time_;
+      if (!has_checkpoint_[i]) continue;
+      const Duration dt = checkpoints_[i] - start_time_;
       const auto ticks = dt.count();
       const long double ns = static_cast<long double>(ticks) * tick_to_ns_;
-      auto& e = entries_.at(i);
+      auto& e = entries_[i];
       if (!e.has_value) {
         e.min_ns = ns;
         e.max_ns = ns;
@@ -80,7 +80,7 @@ class Profiler {
     os << "Runs: " << run_count_ << "\n";
 
     for (std::size_t i = 0; i < MaxEntries; ++i) {
-      const auto& e = entries_.at(i);
+      const auto& e = entries_[i];
       if (!e.has_value || e.count == 0) {
         continue;
       }
