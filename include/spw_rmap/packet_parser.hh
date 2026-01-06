@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <expected>
 #include <span>
-#include <spw_rmap/error_code.hh>
+#include <system_error>
 
 namespace spw_rmap {
 

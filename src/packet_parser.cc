@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "spw_rmap/crc.hh"
+#include "spw_rmap/error_code.hh"
 #include "spw_rmap/rmap_packet_type.hh"
 
 namespace spw_rmap {
