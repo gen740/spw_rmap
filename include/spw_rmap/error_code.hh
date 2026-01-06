@@ -7,10 +7,10 @@
 namespace spw_rmap {
 
 enum class RMAPParseStatus {
-  HeaderCRCError = 0,
-  DataCRCError = 1,
-  IncompletePacket = 2,
-  UnknownProtocolIdentifier = 4,
+  kHeaderCrcError = 0,
+  kDataCrcError = 1,
+  kIncompletePacket = 2,
+  kUnknownProtocolIdentifier = 4,
 };
 
 class RMAPStatusCodeCategory final : public std::error_category {
@@ -21,13 +21,13 @@ class RMAPStatusCodeCategory final : public std::error_category {
 
   [[nodiscard]] auto message(int ev) const -> std::string override {
     switch (static_cast<RMAPParseStatus>(ev)) {
-      case RMAPParseStatus::HeaderCRCError:
+      case RMAPParseStatus::kHeaderCrcError:
         return "Header CRC error";
-      case RMAPParseStatus::DataCRCError:
+      case RMAPParseStatus::kDataCrcError:
         return "Data CRC error";
-      case RMAPParseStatus::IncompletePacket:
+      case RMAPParseStatus::kIncompletePacket:
         return "Incomplete packet";
-      case RMAPParseStatus::UnknownProtocolIdentifier:
+      case RMAPParseStatus::kUnknownProtocolIdentifier:
         return "Unknown protocol identifier";
       default:
         return "Unknown status code";
@@ -35,9 +35,10 @@ class RMAPStatusCodeCategory final : public std::error_category {
   }
 };
 
-auto status_code_category() noexcept -> const std::error_category&;
+auto status_code_category() noexcept -> const std::error_category&;  // NOLINT
 
-inline auto make_error_code(RMAPParseStatus e) noexcept -> std::error_code {
+inline auto make_error_code(RMAPParseStatus e) noexcept  // NOLINT
+    -> std::error_code {
   return {static_cast<int>(e), status_code_category()};
 }
 

@@ -12,69 +12,108 @@
 namespace spw_rmap {
 
 struct ReadPacketConfig {
-  std::span<const uint8_t> targetSpaceWireAddress;
-  std::span<const uint8_t> replyAddress;
-  uint8_t targetLogicalAddress{0};
-  uint8_t initiatorLogicalAddress{0xFE};
-  uint16_t transactionID{0};
-  uint8_t extendedAddress{0};
-  uint32_t address{0};
-  uint32_t dataLength{0};
-  uint8_t key{0};
-  bool incrementMode{true};
+  // Routing to target
+  std::span<const uint8_t> target_spw_address;
+  uint8_t target_logical_address{0};
 
-  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
-    return targetSpaceWireAddress.size() + 4 +
-           ((replyAddress.size() + 3) / 4 * 4) +  // Reply address
-           12;
+  // Routing for reply
+  std::span<const uint8_t> reply_address;
+  uint8_t initiator_logical_address{0xFE};
+
+  // Transaction / authorization
+  uint16_t transaction_id{0};
+  uint8_t key{0};
+
+  // Remote memory location
+  uint8_t extended_address{0};
+  uint32_t address{0};
+  uint32_t data_length{0};
+
+  // Instruction options
+  bool increment_mode{true};
+
+  [[nodiscard]] auto ExpectedSize() const noexcept -> size_t {
+    return target_spw_address.size() + 4 +
+           ((reply_address.size() + 3) / 4 * 4) + 12;
   }
 };
 
 struct WritePacketConfig {
-  std::span<const uint8_t> targetSpaceWireAddress;
-  std::span<const uint8_t> replyAddress;
-  uint8_t targetLogicalAddress{0};
-  uint8_t initiatorLogicalAddress{0xFE};
-  uint16_t transactionID{0};
+  // Routing to target
+  std::span<const uint8_t> target_spw_address;
+  uint8_t target_logical_address{0};
+
+  // Routing for reply
+  std::span<const uint8_t> reply_address;
+  uint8_t initiator_logical_address{0xFE};
+
+  // Transaction / authorization
+  uint16_t transaction_id{0};
   uint8_t key{0};
-  uint8_t extendedAddress{0};
+
+  // Remote memory location
+  uint8_t extended_address{0};
   uint32_t address{0};
-  bool incrementMode{true};
+
+  // Instruction options
+  bool increment_mode{true};
   bool reply{true};
-  bool verifyMode{true};
+  bool verify_mode{true};
+
+  // Data field
   std::span<const uint8_t> data;
 
-  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
-    return targetSpaceWireAddress.size() + 4 +
-           ((replyAddress.size() + 3) / 4 * 4) + 12 + data.size() + 1;
+  [[nodiscard]] auto ExpectedSize() const noexcept -> size_t {
+    return target_spw_address.size() + 4 +
+           ((reply_address.size() + 3) / 4 * 4) + 12 + data.size() + 1;
   }
 };
 
 struct ReadReplyPacketConfig {
-  std::span<const uint8_t> replyAddress;
-  uint8_t initiatorLogicalAddress{0xFE};
-  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
-  uint8_t targetLogicalAddress{0};
-  uint16_t transactionID{0};
-  std::span<const uint8_t> data;
-  bool incrementMode{true};
+  // Routing for reply
+  std::span<const uint8_t> reply_spw_address;
 
-  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
-    return replyAddress.size() + 12 + data.size() + 1;
+  // Logical addressing
+  uint8_t initiator_logical_address{0xFE};
+  uint8_t target_logical_address{0};
+
+  // Transaction identification
+  uint16_t transaction_id{0};
+
+  // Status
+  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
+
+  // Instruction option (copied from command)
+  bool increment_mode{true};
+
+  // Data field
+  std::span<const uint8_t> data;
+
+  [[nodiscard]] auto ExpectedSize() const noexcept -> size_t {
+    return reply_spw_address.size() + 12 + data.size() + 1;
   }
 };
 
 struct WriteReplyPacketConfig {
-  std::span<const uint8_t> replyAddress;
-  uint8_t initiatorLogicalAddress{0xFE};
-  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
-  uint8_t targetLogicalAddress{0};
-  uint16_t transactionID{0};
-  bool incrementMode{true};
-  bool verifyMode{true};
+  // Routing for reply
+  std::span<const uint8_t> reply_spw_address;
 
-  [[nodiscard]] auto expectedSize() const noexcept -> size_t {
-    return replyAddress.size() + 8;
+  // Logical addressing
+  uint8_t initiator_logical_address{0xFE};
+  uint8_t target_logical_address{0};
+
+  // Transaction identification
+  uint16_t transaction_id{0};
+
+  // Status
+  PacketStatusCode status{PacketStatusCode::CommandExecutedSuccessfully};
+
+  // Instruction options (copied from command)
+  bool increment_mode{true};
+  bool verify_mode{true};
+
+  [[nodiscard]] auto ExpectedSize() const noexcept -> size_t {
+    return reply_spw_address.size() + 8;
   }
 };
 

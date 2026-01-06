@@ -371,23 +371,23 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto config = ReadPacketConfig{
-        .targetSpaceWireAddress = target_node.getTargetAddress(),
-        .replyAddress = target_node.getReplyAddress(),
-        .targetLogicalAddress = target_node.getTargetLogicalAddress(),
-        .initiatorLogicalAddress = getInitiatorLogicalAddress(),
-        .transactionID = transaction_id,
-        .extendedAddress = 0x00,
+        .target_spw_address = target_node.getTargetAddress(),
+        .target_logical_address = target_node.getTargetLogicalAddress(),
+        .reply_address = target_node.getReplyAddress(),
+        .initiator_logical_address = getInitiatorLogicalAddress(),
+        .transaction_id = transaction_id,
+        .extended_address = 0x00,
         .address = memory_address,
-        .dataLength = data_length,
+        .data_length = data_length,
     };
     auto send_buffer = std::span(send_buf_);
-    if (config.expectedSize() + 12 > send_buffer.size()) [[unlikely]] {
+    if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
       if (buffer_policy_ == BufferPolicy::Fixed) {
         spw_rmap::debug::debug("Send buffer too small for Read Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
       } else {
-        send_buf_.resize(config.expectedSize() + 12);
+        send_buf_.resize(config.ExpectedSize() + 12);
         send_buffer = std::span(send_buf_);
       }
     }
@@ -398,19 +398,19 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                              res.error().message());
       return std::unexpected{res.error()};
     }
-    if (send_buffer.size() < config.expectedSize() + 12) [[unlikely]] {
+    if (send_buffer.size() < config.ExpectedSize() + 12) [[unlikely]] {
       if (buffer_policy_ == BufferPolicy::Fixed) {
         spw_rmap::debug::debug("Send buffer too small for Read Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
       } else {
-        send_buf_.resize(config.expectedSize() + 12);
+        send_buf_.resize(config.ExpectedSize() + 12);
         send_buffer = std::span(send_buf_);
       }
     }
-    setHeader_(config.expectedSize());
+    setHeader_(config.ExpectedSize());
     return tcp_backend_->sendAll(
-        std::span(send_buf_).first(config.expectedSize() + 12));
+        std::span(send_buf_).first(config.ExpectedSize() + 12));
   }
 
   auto sendWritePacket_(const TargetNode& target_node, uint16_t transaction_id,
@@ -419,24 +419,24 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       -> std::expected<void, std::error_code> {
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto config = WritePacketConfig{
-        .targetSpaceWireAddress = target_node.getTargetAddress(),
-        .replyAddress = target_node.getReplyAddress(),
-        .targetLogicalAddress = target_node.getTargetLogicalAddress(),
-        .initiatorLogicalAddress = getInitiatorLogicalAddress(),
-        .transactionID = transaction_id,
-        .extendedAddress = 0x00,
+        .target_spw_address = target_node.getTargetAddress(),
+        .target_logical_address = target_node.getTargetLogicalAddress(),
+        .reply_address = target_node.getReplyAddress(),
+        .initiator_logical_address = getInitiatorLogicalAddress(),
+        .transaction_id = transaction_id,
+        .extended_address = 0x00,
         .address = memory_address,
-        .verifyMode = isVerifyMode(),
+        .verify_mode = isVerifyMode(),
         .data = data,
     };
     auto send_buffer = std::span(send_buf_);
-    if (config.expectedSize() + 12 > send_buffer.size()) [[unlikely]] {
+    if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
       if (buffer_policy_ == BufferPolicy::Fixed) {
         spw_rmap::debug::debug("Send buffer too small for Write Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
       } else {
-        send_buf_.resize(config.expectedSize() + 12);
+        send_buf_.resize(config.ExpectedSize() + 12);
         send_buffer = std::span(send_buf_);
       }
     }
@@ -446,9 +446,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                              res.error().message());
       return std::unexpected{res.error()};
     }
-    setHeader_(config.expectedSize());
+    setHeader_(config.ExpectedSize());
     return tcp_backend_->sendAll(
-        std::span(send_buf_).first(config.expectedSize() + 12));
+        std::span(send_buf_).first(config.ExpectedSize() + 12));
   }
 
   auto sendReadReplyPacket_(Packet packet, const std::vector<uint8_t>& data)
@@ -459,23 +459,23 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
     }
     auto config = ReadReplyPacketConfig{
-        .replyAddress = packet.replyAddress,
-        .initiatorLogicalAddress = packet.targetLogicalAddress,
+        .reply_spw_address = packet.replyAddress,
+        .initiator_logical_address = packet.targetLogicalAddress,
+        .target_logical_address = packet.initiatorLogicalAddress,
+        .transaction_id = packet.transactionID,
         .status = PacketStatusCode::CommandExecutedSuccessfully,
-        .targetLogicalAddress = packet.initiatorLogicalAddress,
-        .transactionID = packet.transactionID,
+        .increment_mode = true,
         .data = data,
-        .incrementMode = true,
     };
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto send_buffer = std::span(send_buf_);
-    if (config.expectedSize() + 12 > send_buffer.size()) [[unlikely]] {
+    if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
       if (buffer_policy_ == BufferPolicy::Fixed) {
         spw_rmap::debug::debug("Send buffer too small for Read Reply Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
       }
-      send_buf_.resize(config.expectedSize() + 12);
+      send_buf_.resize(config.ExpectedSize() + 12);
       send_buffer = std::span(send_buf_);
     }
     auto build_res =
@@ -485,31 +485,31 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                              build_res.error().message());
       return std::unexpected{build_res.error()};
     }
-    setHeader_(config.expectedSize());
+    setHeader_(config.ExpectedSize());
     return tcp_backend_->sendAll(
-        std::span(send_buf_).first(config.expectedSize() + 12));
+        std::span(send_buf_).first(config.ExpectedSize() + 12));
   }
 
   auto sendWriteReplyPacket_(Packet packet)
       -> std::expected<void, std::error_code> {
     auto config = WriteReplyPacketConfig{
-        .replyAddress = packet.replyAddress,
-        .initiatorLogicalAddress = packet.targetLogicalAddress,
+        .reply_spw_address = packet.replyAddress,
+        .initiator_logical_address = packet.targetLogicalAddress,
+        .target_logical_address = packet.initiatorLogicalAddress,
+        .transaction_id = packet.transactionID,
         .status = PacketStatusCode::CommandExecutedSuccessfully,
-        .targetLogicalAddress = packet.initiatorLogicalAddress,
-        .transactionID = packet.transactionID,
-        .incrementMode = true,
-        .verifyMode = true,
+        .increment_mode = true,
+        .verify_mode = true,
     };
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto send_buffer = std::span(send_buf_);
-    if (config.expectedSize() + 12 > send_buffer.size()) [[unlikely]] {
+    if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
       if (buffer_policy_ == BufferPolicy::Fixed) {
         spw_rmap::debug::debug("Send buffer too small for Write Reply Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
       }
-      send_buf_.resize(config.expectedSize() + 12);
+      send_buf_.resize(config.ExpectedSize() + 12);
       send_buffer = std::span(send_buf_);
     }
     auto build_res =
@@ -519,9 +519,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                 << build_res.error().message() << "\n";
       return std::unexpected{build_res.error()};
     }
-    setHeader_(config.expectedSize());
+    setHeader_(config.ExpectedSize());
     return tcp_backend_->sendAll(
-        std::span(send_buf_).first(config.expectedSize() + 12));
+        std::span(send_buf_).first(config.ExpectedSize() + 12));
   }
 
  public:

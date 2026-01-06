@@ -169,15 +169,15 @@ auto makeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
 auto buildWriteReplyFrame(uint16_t transaction_id) -> std::vector<uint8_t> {
   auto reply_addr = std::array<uint8_t, 1>{0x01};
   auto config = spw_rmap::WriteReplyPacketConfig{
-      .replyAddress = reply_addr,
-      .initiatorLogicalAddress = 0x34,
+      .reply_spw_address = reply_addr,
+      .initiator_logical_address = 0x34,
+      .target_logical_address = 0xFE,
+      .transaction_id = transaction_id,
       .status = spw_rmap::PacketStatusCode::CommandExecutedSuccessfully,
-      .targetLogicalAddress = 0xFE,
-      .transactionID = transaction_id,
-      .incrementMode = true,
-      .verifyMode = true,
+      .increment_mode = true,
+      .verify_mode = true,
   };
-  std::vector<uint8_t> payload(config.expectedSize());
+  std::vector<uint8_t> payload(config.ExpectedSize());
   EXPECT_TRUE(spw_rmap::BuildWriteReplyPacket(config, payload).has_value());
   return makeFrame(payload);
 }

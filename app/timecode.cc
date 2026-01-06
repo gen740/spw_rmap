@@ -1,9 +1,9 @@
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
-#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <optional>
@@ -162,8 +162,7 @@ auto main(int argc, char** argv) -> int {
 
   installSignalHandlers();
 
-  spw_rmap::SpwRmapTCPClient client(
-      {.ip_address = opts.ip, .port = opts.port});
+  spw_rmap::SpwRmapTCPClient client({.ip_address = opts.ip, .port = opts.port});
   client.setInitiatorLogicalAddress(0xFE);
   client.setAutoPollingMode(true);
 
