@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <system_error>
 #include <utility>
@@ -25,6 +26,10 @@ class TCPClient {
 
   std::string ip_address_;
   std::string port_;
+  std::optional<std::chrono::microseconds> last_send_timeout_{};
+  std::optional<std::chrono::microseconds> last_receive_timeout_{};
+
+  auto resetTimeoutCache() noexcept -> void;
 
  public:
   TCPClient() = delete;
