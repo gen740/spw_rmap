@@ -5,7 +5,6 @@
 #include <chrono>
 #include <cstring>
 #include <expected>
-#include <memory>
 #include <mutex>
 
 #include "spw_rmap/internal/spw_rmap_tcp_node_impl.hh"
