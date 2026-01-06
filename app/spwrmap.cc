@@ -266,8 +266,7 @@ auto main(int argc, char** argv) -> int {
 
   auto target_node = spw_rmap::TargetNode(kTargetLogicalAddress)
                          .setTargetAddress(std::move(opts.target_address))
-                         ->setReplyAddress(std::move(opts.reply_address))
-                         .value();
+                         .setReplyAddress(std::move(opts.reply_address));
 
   bool success = opts.type == "read" ? performRead(opts, client, target_node)
                                      : performWrite(opts, client, target_node);
