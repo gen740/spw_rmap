@@ -34,7 +34,7 @@ print(list(data))
 - `SpwRmapTCPNode` owns the SpaceWire-over-TCP connection and performs the request/reply handshake.
 - Calls are synchronous: they block until a reply frame is parsed or the default timeout elapses. Catch the raised exception to handle transport or timeout errors explicitly.
 
-Destroy the node (or let it go out of scope) to close the TCP connection. You can also call `node.shutdown()` manually when deterministic teardown is required.
+Destroy the node (or let it go out of scope) to close the TCP connection. For deterministic teardown, wrap it in a context manager as shown in `examples/spwrmap_example.py` so `connect()` and cleanup stay paired.
 
 ## Building from source
 
