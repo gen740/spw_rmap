@@ -230,6 +230,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
       listen_fd_ = -1;
       continue;
     }
+    resetTimeoutCache();
 
     last =
         internal::server_set_sockopts(client_fd_)
@@ -239,6 +240,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
                   listen_fd_ = -1;
                   close_retry_(client_fd_);
                   client_fd_ = -1;
+                  resetTimeoutCache();
                   spw_rmap::debug::debug([ec]() {
                     std::ostringstream oss;
                     oss << "Failed to set socket options on accepted socket: "
@@ -251,6 +253,7 @@ auto TCPServer::accept_once() noexcept -> std::expected<void, std::error_code> {
   ::freeaddrinfo(res);
   if (client_fd_ < 0) [[unlikely]] {
     client_fd_ = -1;
+    resetTimeoutCache();
     return last;
   }
   close_retry_(listen_fd_);
@@ -267,6 +270,7 @@ auto TCPServer::ensureConnect() noexcept
     spw_rmap::debug::debug("Client socket unhealthy, reopening server socket");
     close_retry_(client_fd_);
     client_fd_ = -1;
+    resetTimeoutCache();
   }
   return accept_once();
 }
@@ -274,6 +278,7 @@ auto TCPServer::ensureConnect() noexcept
 TCPServer::~TCPServer() noexcept {
   close_retry_(client_fd_);
   client_fd_ = -1;
+  resetTimeoutCache();
   close_retry_(listen_fd_);
   listen_fd_ = -1;
 }
@@ -283,6 +288,10 @@ auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (client_fd_ >= 0 && last_send_timeout_.has_value() &&
+      *last_send_timeout_ == timeout) [[likely]] {
+    return {};
   }
   const auto tv_sec = static_cast<time_t>(
       std::chrono::duration_cast<std::chrono::seconds>(timeout).count());
@@ -298,6 +307,7 @@ auto TCPServer::setSendTimeout(std::chrono::microseconds timeout) noexcept
     log_errno_("Failed to set send timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
+  last_send_timeout_ = timeout;
   return {};
 }
 
@@ -306,6 +316,10 @@ auto TCPServer::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (client_fd_ >= 0 && last_receive_timeout_.has_value() &&
+      *last_receive_timeout_ == timeout) [[likely]] {
+    return {};
   }
   const auto tv_sec = static_cast<time_t>(
       std::chrono::duration_cast<std::chrono::seconds>(timeout).count());
@@ -321,6 +335,7 @@ auto TCPServer::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
     log_errno_("Failed to set receive timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
+  last_receive_timeout_ = timeout;
   return {};
 }
 
@@ -388,6 +403,11 @@ auto TCPServer::shutdown() noexcept -> std::expected<void, std::error_code> {
     return std::unexpected(std::error_code(err, std::generic_category()));
   }
   return {};
+}
+
+auto TCPServer::resetTimeoutCache() noexcept -> void {
+  last_send_timeout_.reset();
+  last_receive_timeout_.reset();
 }
 
 };  // namespace spw_rmap::internal

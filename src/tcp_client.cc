@@ -274,16 +274,14 @@ static inline auto gai_category() noexcept -> const std::error_category& {
       const int err = errno;
       log_errno_("Failed to create client socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
-      close_retry_(fd_);
-      fd_ = -1;
+      disconnect();
       continue;
     }
     last = internal::set_sockopts(fd_).and_then([this, timeout, ai]() -> auto {
       return connect_with_timeout_(fd_, ai->ai_addr, ai->ai_addrlen, timeout);
     });
     if (!last.has_value()) [[unlikely]] {
-      close_retry_(fd_);
-      fd_ = -1;
+      disconnect();
       continue;
     }
     break;  // success
@@ -311,6 +309,7 @@ auto TCPClient::ensureConnect(std::chrono::microseconds timeout) noexcept
 auto TCPClient::disconnect() noexcept -> void {
   close_retry_(fd_);
   fd_ = -1;
+  resetTimeoutCache();
 }
 
 auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
@@ -318,6 +317,10 @@ auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (fd_ >= 0 && last_send_timeout_.has_value() &&
+      *last_send_timeout_ == timeout) [[likely]] {
+    return {};
   }
   const auto tv_sec = static_cast<time_t>(
       std::chrono::duration_cast<std::chrono::seconds>(timeout).count());
@@ -333,6 +336,7 @@ auto TCPClient::setSendTimeout(std::chrono::microseconds timeout) noexcept
     log_errno_("Failed to set send timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
+  last_send_timeout_ = timeout;
   return {};
 }
 
@@ -341,6 +345,10 @@ auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (fd_ >= 0 && last_receive_timeout_.has_value() &&
+      *last_receive_timeout_ == timeout) [[likely]] {
+    return {};
   }
   const auto tv_sec = static_cast<time_t>(
       std::chrono::duration_cast<std::chrono::seconds>(timeout).count());
@@ -354,6 +362,7 @@ auto TCPClient::setReceiveTimeout(std::chrono::microseconds timeout) noexcept
     log_errno_("Failed to set receive timeout", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
+  last_receive_timeout_ = timeout;
   return {};
 }
 
@@ -461,6 +470,11 @@ auto TCPClient::shutdown() noexcept -> std::expected<void, std::error_code> {
     return std::unexpected(std::error_code(err, std::generic_category()));
   }
   return {};
+}
+
+auto TCPClient::resetTimeoutCache() noexcept -> void {
+  last_send_timeout_.reset();
+  last_receive_timeout_.reset();
 }
 
 }  // namespace spw_rmap::internal

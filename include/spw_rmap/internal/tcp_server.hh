@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <span>
 #include <string>
 #include <system_error>
@@ -28,6 +29,8 @@ class TCPServer {
   static auto close_retry_(int fd) noexcept -> void;
   std::string bind_address_;
   std::string port_;
+  std::optional<std::chrono::microseconds> last_send_timeout_{};
+  std::optional<std::chrono::microseconds> last_receive_timeout_{};
 
  public:
   TCPServer() = delete;
@@ -76,6 +79,9 @@ class TCPServer {
   }
 
   auto setPort(std::string port) noexcept -> void { port_ = std::move(port); }
+
+ private:
+  auto resetTimeoutCache() noexcept -> void;
 };
 
 }  // namespace spw_rmap::internal
