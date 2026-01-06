@@ -25,8 +25,8 @@ inline void SetRuntimeEnabled(bool value) noexcept {
   return detail::RuntimeFlag().load(std::memory_order_relaxed);
 }
 #else
-inline void set_runtime_enabled(bool) noexcept {}
-[[nodiscard]] inline constexpr auto is_runtime_enabled() noexcept -> bool {
+inline void SetRuntimeEnabled(bool) noexcept {}
+[[nodiscard]] inline constexpr auto IsRuntimeEnabled() noexcept -> bool {
   return false;
 }
 #endif
