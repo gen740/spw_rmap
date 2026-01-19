@@ -78,12 +78,7 @@
               nativeBuildInputs = [
                 pkgs.cmake
                 pkgs.ninja
-                (pkgs.python313.withPackages (
-                  ps: with ps; [
-                    pybind11
-                    pybind11-stubgen
-                  ]
-                ))
+                pkgs.python314Packages.pybind11-stubgen
               ];
               cmakeFlags = [
                 "-DSPWRMAP_BUILD_PYTHON_BINDINGS=ON"
@@ -91,6 +86,7 @@
               ];
               buildInputs = [
                 pkgs.gtest
+                pkgs.python314Packages.pybind11
               ];
             };
           };
