@@ -387,14 +387,17 @@ auto TCPClient::SendAll(std::span<const uint8_t> data) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Send would block, timing out");
+        Disconnect();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Send failed", err);
+      Disconnect();
       return std::unexpected{std::error_code(err, std::system_category())};
     }
     if (n == 0) [[unlikely]] {
       if (retried_zero) [[unlikely]] {
         spw_rmap::debug::Debug("Send returned zero twice, treating as error");
+        Disconnect();
         return std::unexpected{std::make_error_code(std::errc::io_error)};
       }
       pollfd pfd{.fd = fd_, .events = POLLOUT, .revents = 0};
@@ -405,23 +408,27 @@ auto TCPClient::SendAll(std::span<const uint8_t> data) noexcept
 
       if (prc == 0) [[unlikely]] {
         spw_rmap::debug::Debug("Poll timed out after send returned zero");
+        Disconnect();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       if (prc < 0) [[unlikely]] {
         const int poll_err = errno;
         LogErrno("Poll failed after send returned zero", poll_err);
+        Disconnect();
         return std::unexpected{
             std::error_code(poll_err, std::system_category())};
       }
       if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket error after send returned zero, treating as closed");
+        Disconnect();
         return std::unexpected{
             std::make_error_code(std::errc::connection_aborted)};
       }
       if ((pfd.revents & POLLOUT) == 0) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket not writable after send returned zero, treating as error");
+        Disconnect();
         return std::unexpected{std::make_error_code(std::errc::io_error)};
       }
       retried_zero = true;
@@ -437,6 +444,10 @@ auto TCPClient::RecvSome(std::span<uint8_t> buf) noexcept
   if (buf.empty()) [[unlikely]] {
     return 0U;  // Nothing to receive
   }
+  if (fd_ < 0) [[unlikely]] {
+    spw_rmap::debug::Debug("Not connected");
+    return std::unexpected{std::make_error_code(std::errc::not_connected)};
+  }
   for (;;) {
     const ssize_t n = ::recv(fd_, buf.data(), buf.size(), 0);
     if (n < 0) [[unlikely]] {
@@ -446,12 +457,15 @@ auto TCPClient::RecvSome(std::span<uint8_t> buf) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Receive would block, timing out");
+        Disconnect();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Receive failed", err);
+      Disconnect();
       return std::unexpected{std::error_code(err, std::system_category())};
     } else if (n == 0) [[unlikely]] {
       spw_rmap::debug::Debug("Connection closed by peer");
+      Disconnect();
       return std::unexpected{std::make_error_code(std::errc::io_error)};
     }
     return static_cast<size_t>(n);

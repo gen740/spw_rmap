@@ -341,6 +341,16 @@ auto TCPServer::SetReceiveTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
     -> std::expected<void, std::error_code> {
+  if (client_fd_ < 0) [[unlikely]] {
+    spw_rmap::debug::Debug("Client socket not connected");
+    return std::unexpected{std::make_error_code(std::errc::not_connected)};
+  }
+  const auto drop_client = [this]() noexcept {
+    CloseRetry(client_fd_);
+    client_fd_ = -1;
+    ResetTimeoutCache();
+  };
+  bool retried_zero = false;
   while (!data.empty()) {
 #ifndef __APPLE__
     constexpr int kFlags = MSG_NOSIGNAL;
@@ -355,13 +365,51 @@ auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) {
         spw_rmap::debug::Debug("Send would block, timing out");
+        drop_client();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Send failed", err);
+      drop_client();
       return std::unexpected{std::error_code(err, std::system_category())};
     }
     if (n == 0) {
-      continue;  // not EOF for send(); retry
+      if (retried_zero) {
+        spw_rmap::debug::Debug("Send returned zero twice, treating as error");
+        drop_client();
+        return std::unexpected{std::make_error_code(std::errc::io_error)};
+      }
+      pollfd pfd{.fd = client_fd_, .events = POLLOUT, .revents = 0};
+      int prc = 0;
+      do {
+        prc = ::poll(&pfd, 1, 10);
+      } while (prc < 0 && errno == EINTR);
+      if (prc == 0) {
+        spw_rmap::debug::Debug("Poll timed out after send returned zero");
+        drop_client();
+        return std::unexpected{std::make_error_code(std::errc::timed_out)};
+      }
+      if (prc < 0) {
+        const int poll_err = errno;
+        LogErrno("Poll failed after send returned zero", poll_err);
+        drop_client();
+        return std::unexpected{
+            std::error_code(poll_err, std::system_category())};
+      }
+      if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+        spw_rmap::debug::Debug(
+            "Socket error after send returned zero, treating as closed");
+        drop_client();
+        return std::unexpected{
+            std::make_error_code(std::errc::connection_aborted)};
+      }
+      if ((pfd.revents & POLLOUT) == 0) {
+        spw_rmap::debug::Debug(
+            "Socket not writable after send returned zero, treating as error");
+        drop_client();
+        return std::unexpected{std::make_error_code(std::errc::io_error)};
+      }
+      retried_zero = true;
+      continue;
     }
     data = data.subspan(static_cast<std::size_t>(n));
   }
@@ -373,6 +421,15 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
   if (buf.empty()) {
     return 0U;
   }
+  if (client_fd_ < 0) [[unlikely]] {
+    spw_rmap::debug::Debug("Client socket not connected");
+    return std::unexpected{std::make_error_code(std::errc::not_connected)};
+  }
+  const auto drop_client = [this]() noexcept {
+    CloseRetry(client_fd_);
+    client_fd_ = -1;
+    ResetTimeoutCache();
+  };
   for (;;) {
     const ssize_t n = ::recv(client_fd_, buf.data(), buf.size(), 0);
     if (n < 0) [[unlikely]] {
@@ -382,12 +439,18 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) {
         spw_rmap::debug::Debug("Receive would block, timing out");
+        drop_client();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Receive failed", err);
+      drop_client();
       return std::unexpected{std::error_code(err, std::system_category())};
+    } else if (n == 0) {
+      spw_rmap::debug::Debug("Client closed connection");
+      drop_client();
+      return std::unexpected{std::make_error_code(std::errc::io_error)};
     }
-    return static_cast<std::size_t>(n);  // 0 -> EOF
+    return static_cast<std::size_t>(n);
   }
 }
 
