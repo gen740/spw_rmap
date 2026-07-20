@@ -66,6 +66,14 @@ auto SpanEqual(std::span<const T> a, std::span<const T> b)
   return ::testing::AssertionSuccess();
 }
 
+auto RecalculateHeaderCrc(std::vector<uint8_t>& packet,
+                          std::size_t header_start, std::size_t crc_index)
+    -> void {
+  packet[crc_index] =
+      spw_rmap::crc::CalcCrc(std::span<const uint8_t>(packet).subspan(
+          header_start, crc_index - header_start));
+}
+
 TEST(spw_rmap, ReadPacket) {
   using namespace spw_rmap;
 
@@ -147,6 +155,8 @@ TEST(spw_rmap, ReadReplyPacket) {
         .transaction_id =
             static_cast<uint16_t>(RandomByte() << 8 | RandomByte()),
         .status = static_cast<PacketStatusCode>(RandomByte()),
+        .reply_address_length =
+            static_cast<uint8_t>((reply_address.size() + 3) / 4),
         .increment_mode = RandomByte() % 2 == 0,
         .data = data,
     };
@@ -167,6 +177,7 @@ TEST(spw_rmap, ReadReplyPacket) {
     EXPECT_TRUE(SpanEqual(d.data, c.data));
     EXPECT_EQ(d.type, PacketType::kReadReply);
     EXPECT_EQ(d.instruction & 0b00000100, c.increment_mode ? 0b00000100 : 0);
+    EXPECT_EQ(d.instruction & 0b00000011, c.reply_address_length);
   }
 }
 
@@ -252,6 +263,8 @@ TEST(spw_rmap, WriteReplyPacket) {
         .transaction_id =
             static_cast<uint16_t>(RandomByte() << 8 | RandomByte()),
         .status = static_cast<PacketStatusCode>(RandomByte()),
+        .reply_address_length =
+            static_cast<uint8_t>((reply_address.size() + 3) / 4),
         .increment_mode = RandomByte() % 2 == 0,
         .verify_mode = RandomByte() % 2 == 0,
     };
@@ -272,6 +285,7 @@ TEST(spw_rmap, WriteReplyPacket) {
     EXPECT_EQ(d.transaction_id, c.transaction_id);
     EXPECT_EQ(d.type, PacketType::kWriteReply);
     EXPECT_EQ(d.instruction & 0b00000100, c.increment_mode ? 0b00000100 : 0);
+    EXPECT_EQ(d.instruction & 0b00000011, c.reply_address_length);
   }
 }
 
@@ -425,6 +439,24 @@ TEST(spw_rmap, ReadReplyBuilderRejectsUnencodableDataLength) {
   EXPECT_EQ(result.error(), std::make_error_code(std::errc::invalid_argument));
 }
 
+TEST(spw_rmap, ReplyBuildersRejectInvalidReplyAddressLengthField) {
+  using namespace spw_rmap;
+
+  auto read = ReadReplyPacketConfig{};
+  read.reply_address_length = 4;
+  auto read_result = BuildReadReplyPacket(read, {});
+  ASSERT_FALSE(read_result.has_value());
+  EXPECT_EQ(read_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+
+  auto write = WriteReplyPacketConfig{};
+  write.reply_address_length = 4;
+  auto write_result = BuildWriteReplyPacket(write, {});
+  ASSERT_FALSE(write_result.has_value());
+  EXPECT_EQ(write_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+}
+
 TEST(spw_rmap, ParserRejectsUnknownProtocolWithValidCrc) {
   using namespace spw_rmap;
 
@@ -446,6 +478,64 @@ TEST(spw_rmap, ParserRejectsUnknownProtocolWithValidCrc) {
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(),
             make_error_code(RMAPParseStatus::kUnknownProtocolIdentifier));
+}
+
+TEST(spw_rmap, ParserRejectsReservedPacketTypesAndUnsupportedCommands) {
+  using namespace spw_rmap;
+
+  auto config = ReadPacketConfig{};
+  config.target_logical_address = 0x34;
+  std::vector<uint8_t> valid_packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildReadPacket(config, valid_packet).has_value());
+
+  const auto expect_invalid_instruction = [&valid_packet](uint8_t instruction) {
+    auto packet = valid_packet;
+    packet[2] = instruction;
+    RecalculateHeaderCrc(packet, 0, packet.size() - 1);
+
+    auto result = ParseRMAPPacket(packet);
+
+    ASSERT_FALSE(result.has_value())
+        << "instruction 0x" << std::hex << static_cast<int>(instruction);
+    EXPECT_EQ(result.error(), make_error_code(RMAPParseStatus::kInvalidHeader));
+  };
+
+  expect_invalid_instruction(0b10001100);  // Reserved packet type 0b10.
+  expect_invalid_instruction(0b11001100);  // Reserved packet type 0b11.
+  expect_invalid_instruction(0b01000100);  // Invalid read command code.
+  expect_invalid_instruction(0b01011100);  // Unsupported RMW command.
+}
+
+TEST(spw_rmap, ParserRejectsInvalidReadReplyHeaderFields) {
+  using namespace spw_rmap;
+
+  auto config = ReadReplyPacketConfig{};
+  config.target_logical_address = 0x34;
+  std::vector<uint8_t> valid_packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildReadReplyPacket(config, valid_packet).has_value());
+
+  const auto expect_invalid_instruction = [&valid_packet](uint8_t instruction) {
+    auto packet = valid_packet;
+    packet[2] = instruction;
+    RecalculateHeaderCrc(packet, 0, 11);
+
+    auto result = ParseRMAPPacket(packet);
+
+    ASSERT_FALSE(result.has_value())
+        << "instruction 0x" << std::hex << static_cast<int>(instruction);
+    EXPECT_EQ(result.error(), make_error_code(RMAPParseStatus::kInvalidHeader));
+  };
+
+  expect_invalid_instruction(0b00011100);  // RMW, not a read reply.
+  expect_invalid_instruction(0b00000100);  // Reply bit is clear.
+
+  auto nonzero_reserved_byte = valid_packet;
+  nonzero_reserved_byte[7] = 0xA5;
+  RecalculateHeaderCrc(nonzero_reserved_byte, 0, 11);
+  auto result = ParseRMAPPacket(nonzero_reserved_byte);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), make_error_code(RMAPParseStatus::kInvalidHeader));
 }
 
 TEST(spw_rmap, EmptyReadReplyDataRoundTrips) {
@@ -505,4 +595,33 @@ TEST(spw_rmap, ReplyAddressPaddingRoundTripsEveryLength) {
     ASSERT_TRUE(result.has_value()) << "reply length " << length;
     EXPECT_TRUE(SpanEqual(result->reply_address, config.reply_address));
   }
+}
+
+TEST(spw_rmap, AllZeroReplyAddressMapsToSingleZeroRoute) {
+  using namespace spw_rmap;
+
+  const std::array<uint8_t, 1> zero_route{0x00};
+  auto read = ReadPacketConfig{};
+  read.target_logical_address = 0x34;
+  read.reply_address = zero_route;
+  std::vector<uint8_t> read_packet(read.ExpectedSize());
+  ASSERT_TRUE(BuildReadPacket(read, read_packet).has_value());
+
+  auto parsed_read = ParseRMAPPacket(read_packet);
+  ASSERT_TRUE(parsed_read.has_value());
+  ASSERT_EQ(parsed_read->reply_address.size(), 1U);
+  EXPECT_EQ(parsed_read->reply_address.front(), 0x00);
+
+  const std::array<uint8_t, 1> data{0x5A};
+  auto write = WritePacketConfig{};
+  write.target_logical_address = 0x34;
+  write.reply_address = zero_route;
+  write.data = data;
+  std::vector<uint8_t> write_packet(write.ExpectedSize());
+  ASSERT_TRUE(BuildWritePacket(write, write_packet).has_value());
+
+  auto parsed_write = ParseRMAPPacket(write_packet);
+  ASSERT_TRUE(parsed_write.has_value());
+  ASSERT_EQ(parsed_write->reply_address.size(), 1U);
+  EXPECT_EQ(parsed_write->reply_address.front(), 0x00);
 }

@@ -79,102 +79,141 @@ python -m pip install .  # uses pyproject + scikit-build-core
 
 The resulting package exposes a synchronous subset of the C++ API through `_core.SpwRmapTCPNode`.
 
-## Key Concepts
+## C++ request and receive model
 
-- `target_node`: abstraction describing a SpaceWire node address (logical address, SpaceWire hop list, reply path). Implemented by `spw_rmap::TargetNode`, which stores up to 12 hops for both the outbound and reply paths.
-- `tcp_node`: the SpaceWire-over-TCP bridge (`SpwRmapTCPClient`/`SpwRmapTCPServer`) that owns the sockets, buffers, and RMAP transaction management.
-- `Write` / `Read`: synchronous helpers that perform the transaction, block until a reply arrives (or timeout happens), and return `std::expected` success/error codes.
-- `WriteAsync` / `ReadAsync`: asynchronous variants that immediately return the reserved transaction ID (inside `std::expected`) and invoke a user-supplied callback once the reply or error is available, enabling low-latency event handling without blocking the caller.
+There are two separate decisions:
 
-See `examples/spwrmap_example_sync.cc`, `examples/spwrmap_example_async.cc` (C++), and `examples/spwrmap_example.py` (Python) for minimal workflows demonstrating how to connect, construct a target node, and issue read/write RMAP commands.
+1. `Write` / `Read` versus `WriteAsync` / `ReadAsync` determines whether the requesting thread waits for the reply.
+2. `SetAutoPollingMode` determines who receives replies for synchronous requests. It does not start a polling thread.
 
-# Quick Start Guide
+The supported combinations are:
 
-## C++
+| Auto-polling | Receive driver | Available request APIs | Request completion |
+|---|---|---|---|
+| On | The calling `Write` / `Read` call | `Write`, `Read` | The call sends, receives one matching reply, and returns synchronously. Calls on the node are serialized. |
+| Off (default) | Exactly one background `RunLoop` or polling thread | `Write`, `Read` | The call sends through the async transaction machinery, then waits for its internal callback. The receive loop invokes that callback and wakes the caller. |
+| Off (default) | Exactly one `RunLoop` or repeated `Poll` calls | `WriteAsync`, `ReadAsync` | The call builds and sends the packet before returning its transaction ID. The receive loop later invokes the supplied callback. |
 
-### Initialize spw
+With auto-polling off, synchronous and asynchronous requests may share the same receive loop and may be interleaved. A synchronous `Write` / `Read` is implemented as an async transaction plus an internal condition-variable wait; it does not receive from the socket itself. Therefore, start `RunLoop` (or another thread calling `Poll`) before issuing such a synchronous request.
+
+Synchronous `Write` / `Read` require the matching reply type and `PacketStatusCode::kCommandExecutedSuccessfully`. A non-zero RMAP status is returned as a `std::error_code` in the `RMAPReplyStatus` category, preserving statuses such as `kInvalidKey`. The asynchronous APIs continue to deliver the parsed `Packet` to the callback so the callback can inspect `Packet::status` directly.
+
+`WriteAsync` / `ReadAsync` are asynchronous only with respect to waiting for the reply. Packet construction and TCP transmission happen in the calling thread and are complete before a successful return. The callback only handles the matching reply or transaction error. Because `RunLoop` may receive a very fast reply concurrently, the callback can run before the async function returns.
+
+When auto-polling is on, do not call `Poll` or `RunLoop`; `WriteAsync` and `ReadAsync` return `std::errc::operation_not_permitted`.
+
+### Target node
 
 ```cpp
+spw_rmap::TargetNode target(0x34);              // target logical address
+target.SetTargetAddress(3, 5, 7);               // outbound SpaceWire path
+target.SetReplyAddress(9, 11, 13, 0x00);        // reply path
+```
+
+Both paths have a maximum length of 12 bytes.
+
+### Synchronous client without a receive thread
+
+Use this mode for command-line tools and simple request/response applications. No worker thread or explicit polling is required.
+
+```cpp
+#include <array>
 #include <chrono>
-#include <system_error>
+#include <span>
 
 #include <spw_rmap/spw_rmap_tcp_node.hh>
 #include <spw_rmap/target_node.hh>
 
-int main() {
-  using namespace std::chrono_literals;
+using namespace std::chrono_literals;
 
-  spw_rmap::SpwRmapTCPClient client(
-      {.ip_address = "127.0.0.1", .port = "10030"});
+spw_rmap::SpwRmapTCPClient client(
+    {.ip_address = "127.0.0.1", .port = "10030"});
+client.SetInitiatorLogicalAddress(0xFE);
+client.SetAutoPollingMode(true);
+client.Connect(500ms).value();
 
-  client.SetInitiatorLogicalAddress(0xFE);
-  client.SetAutoPollingMode(true);
-  client.Connect(500ms).value();  // abort on failure
-
-  // Issue synchronous Read/Write calls on this thread.
-
-  auto shutdown_res = client.Shutdown();
-  if (!shutdown_res.has_value()) {
-    throw std::system_error(shutdown_res.error());
-  }
-}
-```
-
-For asynchronous operation, submit `ReadAsync`/`WriteAsync` calls and use exactly one polling loop to dispatch their replies. Follow the concurrency contract below.
-
-### Creating target node
-
-```cpp
 spw_rmap::TargetNode target(0x34);
-target.SetTargetAddress(3, 5, 7);              // SpaceWire hops
-target.SetReplyAddress(9, 11, 13, 0x00);       // Reply path (zero-padded)
+target.SetTargetAddress(3, 5, 7).SetReplyAddress(9, 11, 13, 0);
+
+std::array<uint8_t, 4> payload{0x12, 0x34, 0x56, 0x78};
+client.Write(target, 0x20000000, payload, 100ms).value();
+
+std::array<uint8_t, 4> data{};
+client.Read(target, 0x20000000, std::span(data), 100ms).value();
+
+client.Shutdown().value();
 ```
 
-### Read and write
+Auto-polling serializes synchronous calls on the node. This form is suitable when only one request needs to be in flight at a time.
+
+### Shared background `RunLoop`
+
+Leave auto-polling off to let one background `RunLoop` receive all replies. The same loop supports both blocking `Write` / `Read` callers and callback-based `WriteAsync` / `ReadAsync` callers.
 
 ```cpp
-std::array<uint8_t, 4> write_payload{0x12, 0x34, 0x56, 0x78};
-client.Write(target, /*address=*/0x20000000, write_payload).value();
+#include <array>
+#include <future>
+#include <thread>
 
-std::array<uint8_t, 4> read_buffer{};
-client.Read(target, 0x20000000, std::span(read_buffer)).value();
+spw_rmap::SpwRmapTCPClient client(
+    {.ip_address = "127.0.0.1", .port = "10030"});
+client.SetInitiatorLogicalAddress(0xFE);
+client.Connect(500ms).value();  // auto-polling remains off
 
-auto read_transaction =
-    client
-        .ReadAsync(
-            target, 0x20000000, /*length=*/4,
-            [](std::expected<spw_rmap::Packet, std::error_code> packet) {
-              if (!packet) {
-                std::cerr << "Async read failed: " << packet.error().message()
-                          << '\n';
-                return;
-              }
-              std::cout << "Async read returned "
-                        << packet->data.size() << " bytes\n";
-            })
-        .value();
+spw_rmap::TargetNode target(0x34);
+target.SetTargetAddress(3, 5, 7).SetReplyAddress(9, 11, 13, 0);
 
-auto write_transaction =
-    client
-        .WriteAsync(
-            target, 0x20000000, std::span(write_payload),
-            [](std::expected<spw_rmap::Packet, std::error_code> packet) {
-              if (!packet) {
-                std::cerr << "Async write failed: " << packet.error().message()
-                          << '\n';
-                return;
-              }
-              std::cout << "Async write acknowledged (TID "
-                        << packet->transaction_id << ")\n";
-            })
-        .value();
+std::error_code loop_error;
+std::thread loop([&] {
+  if (auto result = client.RunLoop(); !result) {
+    loop_error = result.error();
+  }
+});
 
-std::cout << "Read TID: " << read_transaction
-          << ", Write TID: " << write_transaction << '\n';
+std::array<uint8_t, 4> payload{0x12, 0x34, 0x56, 0x78};
+
+// Synchronous API: sends now, then waits until RunLoop dispatches the reply to
+// the internal callback.
+client.Write(target, 0x20000000, payload, 100ms).value();
+
+std::array<uint8_t, 4> data{};
+client.Read(target, 0x20000000, std::span(data), 100ms).value();
+
+// Asynchronous API: sends now and returns the transaction ID without waiting.
+std::promise<bool> completed;
+auto completion = completed.get_future();
+
+auto transaction = client.WriteAsync(
+    target, 0x20000000, payload,
+    [&completed](std::expected<spw_rmap::Packet, std::error_code> reply) {
+      const bool success =
+          reply && reply->type == spw_rmap::PacketType::kWriteReply &&
+          reply->status ==
+              spw_rmap::PacketStatusCode::kCommandExecutedSuccessfully;
+      completed.set_value(success);
+    });
+transaction.value();  // transmission succeeded; value is the transaction ID
+
+const bool request_succeeded = completion.get();
+
+client.Stop().value();  // interrupts the blocking receive
+loop.join();
+client.Shutdown().value();
 ```
 
-`Write`/`Read` are *synchronous*: they transmit the command, block until a reply is parsed (or the timeout fires), and return `std::expected`.  
-`WriteAsync`/`ReadAsync` are *asynchronous*: they enqueue the transaction, immediately return the reserved transaction ID (inside `std::expected<uint16_t, std::error_code>`), and invoke the supplied callback as soon as the reply arrives—allowing low-latency event handling without blocking.
+For a single-threaded event loop, submit asynchronous requests and call `Poll()` repeatedly instead of starting `RunLoop()`. Each successful `Poll()` receives one complete frame and dispatches the matching transaction callback. A synchronous `Write` / `Read` cannot drive `Poll()` on the same thread while it is blocked; use auto-polling or a separate receive thread for synchronous calls.
+
+### Callback and lifetime rules
+
+- Use exactly one `Poll` or `RunLoop` per node.
+- Reply callbacks and the internal callbacks used by non-auto-polling `Write` / `Read` execute on the polling thread. A transaction callback expired by `SetTransactionTimeout` is invoked lazily by a later request allocation, on that allocating thread instead.
+- A user callback may run before the corresponding async call returns. Keep callbacks short and non-blocking; blocking the callback also blocks reply dispatch for every transaction on that receive loop.
+- `Packet` address and payload fields are non-owning spans into the receive buffer. Copy anything that must survive after the callback returns.
+- Inspect `Packet::type`, `Packet::status`, and read-data length in the callback. Async APIs intentionally return the parsed reply rather than converting RMAP status values into `std::error_code`.
+- `Stop` does not complete outstanding callbacks. Wait for them or call `CancelTransaction` before stopping the loop. Then join the loop thread before `Shutdown`.
+- Outgoing packet construction and transmission are serialized, so concurrent async submissions cannot interleave bytes on the TCP stream. Receiving remains independent and can block in `RunLoop` while another thread submits a request.
+
+See `examples/spwrmap_example_sync.cc`, `examples/spwrmap_example_async.cc`, and `examples/spwrmap_example.py` for complete programs.
 
 ## Python
 
@@ -215,18 +254,18 @@ The library is not unconditionally thread-safe. The supported combinations are:
 
 | Operations on one node | Concurrent use | Conditions |
 |---|---|---|
-| `Read` / `Write` in auto-polling mode | Supported | Calls are serialized internally. Do not call `Poll`, `RunLoop`, `ReadAsync`, or `WriteAsync` in this mode. |
+| `Read` / `Write` in auto-polling mode | Supported | Calls are serialized internally and receive their own replies. Do not call `Poll`, `RunLoop`, `ReadAsync`, or `WriteAsync` in this mode. |
 | `ReadAsync` / `WriteAsync` / `EmitTimeCode` | Supported | Auto-polling must be off, the connection and configuration must remain unchanged, and caller-owned input objects must remain valid for each call. Transaction allocation and outgoing frame construction are serialized internally. |
-| One `Poll` or `RunLoop` plus asynchronous requests or non-auto-polling `Read` / `Write` | Limited support | Use exactly one receive loop. The current `TCPClient` socket lock can delay a send while a blocking receive owns the descriptor lock, so this is not a general full-duplex thread-safety guarantee. |
+| One `Poll` or `RunLoop` plus async requests and/or non-auto-polling `Read` / `Write` | Supported | Sync and async requests may share the loop. Outgoing frames are serialized independently from the blocking receive direction. |
 | Two or more `Poll` / `RunLoop` calls | Not supported | They share one receive buffer and one TCP byte stream. |
 | `RegisterOnRead`, `RegisterOnWrite`, or `RegisterOnTimeCode` while polling | Not supported | Register callbacks before starting the receive loop. |
-| `Connect`, `Shutdown`, `SetSendTimeout`, `SetTransactionTimeout`, `SetAutoPollingMode`, logical-address/verify-mode setters, or endpoint setters while requests or polling are active | Not supported | Treat these as lifecycle/configuration operations and serialize them at application level. |
+| `Connect`, `Shutdown`, `SetSendTimeout`, `SetTransactionTimeout`, `SetAutoPollingMode`, logical-address/verify-mode setters, or endpoint setters while requests or polling are active | Not supported | Treat these as lifecycle/configuration operations and serialize them at application level. `Stop` is the exception: it is designed to interrupt the one blocking receive loop. |
 | Concurrent access to the same caller-owned `TargetNode`, input span, or output span | Not supported | Use immutable inputs or separate external synchronization. |
 | Any concurrent `TCPServer` socket operations | Not supported | Serialize accept, send, receive, configuration, and shutdown at application level. |
 
-Internally, `TCPClient` protects its descriptor lifetime, `TransactionDatabase` protects transaction allocation/completion, and the node protects outgoing frame construction. Those mutexes provide the specific guarantees above; they do not make the whole object safe for arbitrary concurrent calls. A receive timeout returns `std::errc::timed_out` without discarding an otherwise healthy TCP connection; peer closure and hard socket errors still disconnect it.
+Internally, `TCPClient` uses independent send, receive, and lifecycle locks, `TransactionDatabase` protects transaction allocation/completion, and the node protects outgoing frame construction. Those mutexes provide the specific guarantees above; they do not make the whole object safe for arbitrary concurrent calls. A receive timeout returns `std::errc::timed_out` without discarding an otherwise healthy TCP connection; peer closure and hard socket errors still disconnect it.
 
-`Shutdown()` ends the current client lifecycle. After shutdown, calls such as `EnsureTcpConnection()` return `std::errc::not_connected`; do not race shutdown against another node operation.
+To stop a background `RunLoop()`, call `Stop()`, join the loop thread, and then call `Shutdown()`. `Stop()` sets the loop stop flag and interrupts its blocking receive without destroying the backend. `Shutdown()` ends the current client lifecycle; do not race it against another node operation.
 
 ## Protocol limits
 
@@ -237,7 +276,9 @@ Internally, `TCPClient` protects its descriptor lifetime, `TransactionDatabase` 
 
 ## Timeouts and Error Handling
 
-- `Write` / `Read` accept a `timeout` (default 100 ms). When the timeout expires the pending transaction is cancelled internally, its transaction ID is released, and the call returns `std::errc::timed_out`. This prevents deadlocks when a remote node never replies.
+- `Write` / `Read` accept a `timeout` (default 100 ms). In auto-polling mode it is applied to the socket receive. With auto-polling off it bounds the internal condition-variable wait. In either path, a timeout releases the transaction ID and returns `std::errc::timed_out`.
+
+- `WriteAsync` / `ReadAsync` have no per-call deadline or timer thread. `SetTransactionTimeout` controls when an old transaction ID becomes eligible for reuse. Expiration is noticed during a later transaction allocation; only then is the old callback invoked with `std::errc::timed_out`. Applications needing prompt async deadlines should enforce their own timer and call `CancelTransaction`.
 
 - Asynchronous callbacks run inside the polling loop. If a function you pass to `WriteAsync` / `ReadAsync` throws, the library catches and logs the exception so the loop stays alive—wrap your callback body in your own error handling if you need to mark the operation successful despite local issues.
 
@@ -246,9 +287,11 @@ Python bindings currently offer only synchronous `read`/`write` methods, do not 
 ## Known limitations
 
 - Python read/write timeouts are currently fixed at 100 ms, and the binding does not expose an explicit `shutdown()` method or context-manager protocol. Destruction closes the socket.
-- Synchronous C++ `Read`/`Write` validate reply type, transaction ID, and length, but currently do not convert a non-zero RMAP reply status into an error. Async users can inspect `Packet::status` directly.
+- Synchronous C++ `Read` / `Write` do not convert a non-zero RMAP reply status into an error. In auto-polling mode they validate the expected transaction ID and reply type, and `Read` also validates the data length. With auto-polling off, dispatch is matched by transaction ID, but the internal sync callback does not fully validate reply type/status; `Read` validates the returned data length. Async users receive the `Packet` and should inspect type, status, and length themselves.
+- Automatic client reconnection does not fail or clear transactions belonging to the old connection. Their asynchronous callbacks can remain pending until lazy transaction-ID reclamation, and a request submitted concurrently with descriptor replacement is not yet protected by the normal send/receive locks.
 - `Packet` payload and address fields are non-owning spans into parser or receive buffers. Callbacks must copy data they need to retain after the callback returns.
-- The internal `TCPServer` backend requires its owner to serialize accept, send, receive, and shutdown calls. Unlike `TCPClient`, it does not yet protect socket lifecycle operations with a mutex.
+- `ParseRMAPPacket` verifies packet size and CRCs but does not yet reject every invalid instruction combination or the non-zero reserved byte in a read reply. In particular, read-modify-write command codes are currently classified as reads instead of being rejected as unsupported.
+- The internal `TCPServer` backend requires its owner to serialize accept, send, receive, and shutdown calls. In addition, generated replies do not yet preserve all command header fields: logical-address fields are swapped, instruction mode/address-length bits are not copied, and an all-zero padded reply address is decoded as an empty path rather than the required single zero byte.
 - Span and initializer-list address setters on `TargetNode` require the caller to respect the 12-byte limit; this is enforced by an assertion in debug builds.
 - CI uses loopback TCP peers and synthetic RMAP frames. Hardware-in-the-loop coverage is not yet included.
 

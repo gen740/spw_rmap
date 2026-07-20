@@ -8,6 +8,26 @@
 
 namespace spw_rmap {
 
+namespace {
+
+auto ReplySpwAddressFromField(
+    std::span<const uint8_t> reply_address_field) noexcept
+    -> std::span<const uint8_t> {
+  size_t padding_size = 0;
+  while (padding_size < reply_address_field.size() &&
+         reply_address_field[padding_size] == 0x00) {
+    ++padding_size;
+  }
+  // ECSS-E-ST-50-52C 5.1.6(d): a non-empty, all-zero Reply Address
+  // represents the single-byte Reply SpaceWire Address {0x00}.
+  if (padding_size == reply_address_field.size() && padding_size != 0) {
+    --padding_size;
+  }
+  return reply_address_field.subspan(padding_size);
+}
+
+}  // namespace
+
 auto ParseReadPacket(Packet& packet,
                      const std::span<const uint8_t> data) noexcept
     -> std::expected<Packet, std::error_code> {
@@ -32,19 +52,9 @@ auto ParseReadPacket(Packet& packet,
   packet.instruction = data[head++];
   packet.key = data[head++];
 
-  auto reply_address_first_byte = head;
-  auto reply_address_actual_size = reply_address_size;
-  for (size_t i = 0; i < reply_address_size; ++i) {
-    if (data[head++] == 0x00) {
-      reply_address_first_byte = head;
-      reply_address_actual_size--;
-    } else {
-      head += reply_address_actual_size - 1;
-      break;
-    }
-  }
   packet.reply_address =
-      data.subspan(reply_address_first_byte, reply_address_actual_size);
+      ReplySpwAddressFromField(data.subspan(head, reply_address_size));
+  head += reply_address_size;
 
   packet.initiator_logical_address = data[head++];
   packet.transaction_id = 0;
@@ -84,7 +94,9 @@ auto ParseReadReplyPacket(Packet& packet,
   packet.transaction_id = 0;
   packet.transaction_id |= (data[head++] << 8);
   packet.transaction_id |= (data[head++] << 0);
-  head++;  // Skip reserved byte
+  if (data[head++] != 0x00) [[unlikely]] {
+    return std::unexpected(make_error_code(RMAPParseStatus::kInvalidHeader));
+  }
   packet.data_length = 0;
   packet.data_length |= (data[head++] << 16);
   packet.data_length |= (data[head++] << 8);
@@ -124,19 +136,9 @@ auto ParseWritePacket(Packet& packet,
   }
   packet.instruction = data[head++];
   packet.key = data[head++];
-  auto reply_address_first_byte = head;
-  auto reply_address_actual_size = reply_address_size;
-  for (size_t i = 0; i < reply_address_size; ++i) {
-    if (data[head++] == 0x00) {
-      reply_address_first_byte = head;
-      reply_address_actual_size--;
-    } else {
-      head += reply_address_actual_size - 1;
-      break;
-    }
-  }
   packet.reply_address =
-      data.subspan(reply_address_first_byte, reply_address_actual_size);
+      ReplySpwAddressFromField(data.subspan(head, reply_address_size));
+  head += reply_address_size;
   packet.initiator_logical_address = data[head++];
   packet.transaction_id = 0;
   packet.transaction_id |= (data[head++] << 8);
@@ -208,10 +210,26 @@ auto ParseRMAPPacket(const std::span<const uint8_t> data) noexcept
     return std::unexpected(make_error_code(RMAPParseStatus::kIncompletePacket));
   }
   packet.instruction = data[head + 2];
-  bool is_command = (packet.instruction & 0b01000000) != 0;
-  bool is_write =
+  const bool is_command =
+      (packet.instruction & std::to_underlying(RMAPPacketType::kCommand)) != 0;
+  const bool is_write =
       (packet.instruction & std::to_underlying(RMAPCommandCode::kWrite)) != 0;
-  switch (is_command << 1 | is_write) {
+  const bool verify =
+      (packet.instruction &
+       std::to_underlying(RMAPCommandCode::kVerifyDataBeforeWrite)) != 0;
+  const bool reply =
+      (packet.instruction & std::to_underlying(RMAPCommandCode::kReply)) != 0;
+
+  // Bit 7 makes the two-bit Packet Type reserved. For non-write commands,
+  // bit 4 distinguishes unsupported RMW from read, and read always replies.
+  // A write reply can only correspond to a write that requested a reply.
+  if ((packet.instruction & 0b10000000) != 0 ||
+      (!is_write && (verify || !reply)) || (!is_command && is_write && !reply))
+      [[unlikely]] {
+    return std::unexpected(make_error_code(RMAPParseStatus::kInvalidHeader));
+  }
+
+  switch ((is_command << 1) | is_write) {
     case 0b00:  // Read reply
       packet.type = PacketType::kReadReply;
       packet.reply_spw_address =

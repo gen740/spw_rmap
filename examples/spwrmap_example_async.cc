@@ -83,11 +83,14 @@ auto main() -> int {
     }
   }
 
-  if (auto res = client.Shutdown(); !res.has_value()) {
-    std::cerr << "Shutdown error: " << res.error().message() << '\n';
+  if (auto res = client.Stop(); !res.has_value()) {
+    std::cerr << "Stop error: " << res.error().message() << '\n';
   }
   if (loop.joinable()) {
     loop.join();
+  }
+  if (auto res = client.Shutdown(); !res.has_value()) {
+    std::cerr << "Shutdown error: " << res.error().message() << '\n';
   }
   return 0;
 }

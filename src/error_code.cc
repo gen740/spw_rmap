@@ -7,4 +7,9 @@ auto status_code_category() noexcept -> const std::error_category& {
   return instance;
 }
 
+auto reply_status_category() noexcept -> const std::error_category& {
+  static RMAPReplyStatusCategory instance;
+  return instance;
+}
+
 }  // namespace spw_rmap

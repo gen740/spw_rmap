@@ -47,8 +47,23 @@ class SpwRmapTCPClient
     return SetSendTimeoutInternal(timeout);
   }
 
+  auto Stop() noexcept -> std::expected<void, std::error_code> override {
+    std::lock_guard<std::mutex> lock(shutdown_mtx_);
+    RequestRunLoopStop();
+    if (!GetBackend()) {
+      return {};
+    }
+    auto result = GetBackend()->Shutdown();
+    if (!result.has_value() &&
+        result.error() != std::errc::bad_file_descriptor) {
+      return std::unexpected{result.error()};
+    }
+    return {};
+  }
+
   auto Shutdown() noexcept -> std::expected<void, std::error_code> override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
+    RequestRunLoopStop();
     if (GetBackend()) {
       auto res = GetBackend()->Shutdown();
       shutdowned_ = true;
@@ -104,8 +119,23 @@ class SpwRmapTCPServer
     return SetSendTimeoutInternal(timeout);
   }
 
+  auto Stop() noexcept -> std::expected<void, std::error_code> override {
+    std::lock_guard<std::mutex> lock(shutdown_mtx_);
+    RequestRunLoopStop();
+    if (!GetBackend()) {
+      return {};
+    }
+    auto result = GetBackend()->Shutdown();
+    if (!result.has_value() &&
+        result.error() != std::errc::bad_file_descriptor) {
+      return std::unexpected{result.error()};
+    }
+    return {};
+  }
+
   auto Shutdown() noexcept -> std::expected<void, std::error_code> override {
     std::lock_guard<std::mutex> lock(shutdown_mtx_);
+    RequestRunLoopStop();
     if (GetBackend()) {
       auto res = GetBackend()->Shutdown();
       shutdowned_ = true;

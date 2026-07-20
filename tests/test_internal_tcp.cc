@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
+#include <sys/poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -493,4 +494,151 @@ TEST(TcpClientServer, ConnectReconnectsAfterDrop) {
 
   ASSERT_FALSE(server_error.has_value())
       << "Server thread error: " << *server_error;
+}
+
+TEST(TcpClientServer, BlockingReceiveDoesNotBlockSend) {
+  uint16_t port = 0;
+  try {
+    port = pick_free_port();
+  } catch (const std::system_error& e) {
+    if (e.code() == std::errc::operation_not_permitted) {
+      GTEST_SKIP() << "Skipping due to sandbox restriction: " << e.what();
+    }
+    throw;
+  }
+
+  const int listen_fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  ASSERT_GE(listen_fd, 0);
+  int yes = 1;
+  ASSERT_EQ(
+      ::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)), 0);
+  sockaddr_in sin{};
+  sin.sin_family = AF_INET;
+  sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  sin.sin_port = htons(port);
+  ASSERT_EQ(::bind(listen_fd, reinterpret_cast<sockaddr*>(&sin), sizeof(sin)),
+            0);
+  ASSERT_EQ(::listen(listen_fd, 1), 0);
+
+  std::promise<void> accepted_promise;
+  auto accepted = accepted_promise.get_future();
+  std::optional<std::string> server_error;
+  bool watchdog_fired = false;
+  std::thread server_thread([&]() -> void {
+    const int client_fd = ::accept(listen_fd, nullptr, nullptr);
+    accepted_promise.set_value();
+    if (client_fd < 0) {
+      server_error = std::error_code(errno, std::system_category()).message();
+      return;
+    }
+    pollfd pfd{.fd = client_fd, .events = POLLIN, .revents = 0};
+    const int poll_result = ::poll(&pfd, 1, 750);
+    if (poll_result <= 0 || (pfd.revents & POLLIN) == 0) {
+      watchdog_fired = true;
+      constexpr uint8_t wake = 0xEE;
+      (void)::send(client_fd, &wake, sizeof(wake), 0);
+      close_fd_retry(client_fd);
+      return;
+    }
+    uint8_t request = 0;
+    if (::recv(client_fd, &request, sizeof(request), 0) !=
+        static_cast<ssize_t>(sizeof(request))) {
+      server_error = "server did not receive request";
+      close_fd_retry(client_fd);
+      return;
+    }
+    constexpr uint8_t reply = 0x5A;
+    if (::send(client_fd, &reply, sizeof(reply), 0) !=
+        static_cast<ssize_t>(sizeof(reply))) {
+      server_error = "server did not send reply";
+    }
+    close_fd_retry(client_fd);
+  });
+
+  TCPClient client("127.0.0.1", std::to_string(port));
+  ASSERT_TRUE(client.Connect(500ms).has_value());
+  ASSERT_EQ(accepted.wait_for(1s), std::future_status::ready);
+
+  std::array<uint8_t, 1> received{};
+  auto receive_future = std::async(std::launch::async, [&]() {
+    return client.RecvSome(received);
+  });
+  std::this_thread::sleep_for(50ms);
+  const std::array<uint8_t, 1> request{0x42};
+  auto send_future = std::async(std::launch::async,
+                                [&]() { return client.SendAll(request); });
+
+  const auto send_status = send_future.wait_for(250ms);
+  EXPECT_EQ(send_status, std::future_status::ready)
+      << "send was blocked by the receive direction";
+  auto send_result = send_future.get();
+  auto receive_result = receive_future.get();
+  server_thread.join();
+  close_fd_retry(listen_fd);
+
+  ASSERT_TRUE(send_result.has_value()) << send_result.error().message();
+  ASSERT_TRUE(receive_result.has_value()) << receive_result.error().message();
+  EXPECT_EQ(received[0], 0x5A);
+  EXPECT_FALSE(watchdog_fired);
+  EXPECT_FALSE(server_error.has_value())
+      << (server_error ? *server_error : std::string{});
+}
+
+TEST(TcpClientServer, ShutdownInterruptsBlockingReceive) {
+  uint16_t port = 0;
+  try {
+    port = pick_free_port();
+  } catch (const std::system_error& e) {
+    if (e.code() == std::errc::operation_not_permitted) {
+      GTEST_SKIP() << "Skipping due to sandbox restriction: " << e.what();
+    }
+    throw;
+  }
+
+  const int listen_fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  ASSERT_GE(listen_fd, 0);
+  int yes = 1;
+  ASSERT_EQ(
+      ::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)), 0);
+  sockaddr_in sin{};
+  sin.sin_family = AF_INET;
+  sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  sin.sin_port = htons(port);
+  ASSERT_EQ(::bind(listen_fd, reinterpret_cast<sockaddr*>(&sin), sizeof(sin)),
+            0);
+  ASSERT_EQ(::listen(listen_fd, 1), 0);
+
+  std::promise<void> accepted_promise;
+  auto accepted = accepted_promise.get_future();
+  std::thread server_thread([&]() -> void {
+    const int client_fd = ::accept(listen_fd, nullptr, nullptr);
+    accepted_promise.set_value();
+    if (client_fd >= 0) {
+      std::this_thread::sleep_for(750ms);
+      close_fd_retry(client_fd);
+    }
+  });
+
+  TCPClient client("127.0.0.1", std::to_string(port));
+  ASSERT_TRUE(client.Connect(500ms).has_value());
+  ASSERT_EQ(accepted.wait_for(1s), std::future_status::ready);
+  std::array<uint8_t, 1> received{};
+  auto receive_future = std::async(std::launch::async, [&]() {
+    return client.RecvSome(received);
+  });
+  std::this_thread::sleep_for(50ms);
+
+  const auto started = std::chrono::steady_clock::now();
+  auto shutdown_result = client.Shutdown();
+  const auto elapsed = std::chrono::steady_clock::now() - started;
+
+  ASSERT_TRUE(shutdown_result.has_value())
+      << shutdown_result.error().message();
+  EXPECT_LT(elapsed, 250ms) << "shutdown waited for the peer to close";
+  ASSERT_EQ(receive_future.wait_for(250ms), std::future_status::ready);
+  EXPECT_FALSE(receive_future.get().has_value());
+
+  server_thread.join();
+  close_fd_retry(listen_fd);
+  client.Disconnect();
 }

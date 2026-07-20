@@ -83,6 +83,9 @@ struct ReadReplyPacketConfig {
   // Status
   PacketStatusCode status{PacketStatusCode::kCommandExecutedSuccessfully};
 
+  // Encoded 2-bit Reply Address Length field (copied from command)
+  uint8_t reply_address_length{0};
+
   // Instruction option (copied from command)
   bool increment_mode{true};
 
@@ -107,6 +110,9 @@ struct WriteReplyPacketConfig {
 
   // Status
   PacketStatusCode status{PacketStatusCode::kCommandExecutedSuccessfully};
+
+  // Encoded 2-bit Reply Address Length field (copied from command)
+  uint8_t reply_address_length{0};
 
   // Instruction options (copied from command)
   bool increment_mode{true};

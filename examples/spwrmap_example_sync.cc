@@ -19,9 +19,8 @@ auto main() -> int {
   std::cout << "Connected to RMAP bridge (sync example)\n";
 
   auto target = spw_rmap::TargetNode(0x32)
-                    .SetTargetAddress(0x06d, 0x02)
+                    .SetTargetAddress(0x06, 0x02)
                     .SetReplyAddress(0x01, 0x03);
-  // target.se
 
   const uint32_t kDemoAddress = 0x44A20000;
   const std::array<uint8_t, 4> kPayload{0x01, 0x02, 0x03, 0x04};

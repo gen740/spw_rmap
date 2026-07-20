@@ -9,7 +9,7 @@
 #include "spw_rmap/internal/debug.hh"
 #include "spw_rmap/internal/tcp_client.hh"
 
-TEST(ThreadSafetyTest, TcpClientSerializesDisconnectedSocketOperations) {
+TEST(ThreadSafetyTest, TcpClientSerializesDisconnectedSendsAndReceives) {
   spw_rmap::internal::TCPClient client("127.0.0.1", "1");
   constexpr std::size_t kIterations = 500;
   std::atomic<std::size_t> unexpected_results{0};
@@ -34,22 +34,11 @@ TEST(ThreadSafetyTest, TcpClientSerializesDisconnectedSocketOperations) {
       }
     }
   };
-  auto lifecycle = [&]() -> void {
-    for (std::size_t i = 0; i < kIterations; ++i) {
-      client.Disconnect();
-      auto result = client.Shutdown();
-      if (result.has_value() ||
-          result.error() != std::errc::bad_file_descriptor) {
-        ++unexpected_results;
-      }
-    }
-  };
-
   std::vector<std::thread> threads;
   threads.emplace_back(sender);
   threads.emplace_back(sender);
   threads.emplace_back(receiver);
-  threads.emplace_back(lifecycle);
+  threads.emplace_back(receiver);
   for (auto& thread : threads) {
     thread.join();
   }

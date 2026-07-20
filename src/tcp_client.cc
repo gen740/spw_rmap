@@ -14,6 +14,7 @@
 #include <span>
 #include <sstream>
 #include <system_error>
+#include <tuple>
 
 #include "spw_rmap/internal/debug.hh"
 
@@ -233,7 +234,7 @@ static inline auto GaiCategory() noexcept -> const std::error_category& {
 [[nodiscard]] auto TCPClient::Connect(
     std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   return ConnectUnlocked(timeout);
 }
 
@@ -288,6 +289,7 @@ static inline auto GaiCategory() noexcept -> const std::error_category& {
       DisconnectUnlocked();
       continue;
     }
+    shutdown_requested_ = false;
     break;  // success
   }
 
@@ -300,7 +302,12 @@ static inline auto GaiCategory() noexcept -> const std::error_category& {
 
 auto TCPClient::EnsureConnect(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
+  // SendAll() may call Shutdown() while holding send_mtx_, so preserve the
+  // send_mtx_ -> lifecycle_mtx_ lock order.  Holding send_mtx_ across the
+  // connection check and replacement prevents an in-flight send from crossing
+  // from the old descriptor generation into the newly connected socket.
+  std::lock_guard<std::mutex> send_lock(send_mtx_);
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
   if (fd_ >= 0 && SocketAlive(fd_)) [[likely]] {
     return {};
   }
@@ -312,22 +319,26 @@ auto TCPClient::EnsureConnect(std::chrono::microseconds timeout) noexcept
 }
 
 auto TCPClient::Disconnect() noexcept -> void {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   DisconnectUnlocked();
 }
 
 auto TCPClient::DisconnectUnlocked() noexcept -> void {
   CloseRetry(fd_);
   fd_ = -1;
+  shutdown_requested_ = false;
   ResetTimeoutCache();
 }
 
 auto TCPClient::SetSendTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::Debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (fd_ < 0 || shutdown_requested_) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::not_connected)};
   }
   if (fd_ >= 0 && last_send_timeout_.has_value() &&
       *last_send_timeout_ == timeout) [[likely]] {
@@ -353,10 +364,13 @@ auto TCPClient::SetSendTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPClient::SetReceiveTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::Debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (fd_ < 0 || shutdown_requested_) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::not_connected)};
   }
   if (fd_ >= 0 && last_receive_timeout_.has_value() &&
       *last_receive_timeout_ == timeout) [[likely]] {
@@ -380,7 +394,7 @@ auto TCPClient::SetReceiveTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPClient::SendAll(std::span<const uint8_t> data) noexcept
     -> std::expected<void, std::error_code> {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
+  std::lock_guard<std::mutex> send_lock(send_mtx_);
   if (fd_ < 0) [[unlikely]] {
     spw_rmap::debug::Debug("Not connected");
     return std::unexpected{std::make_error_code(std::errc::not_connected)};
@@ -400,17 +414,17 @@ auto TCPClient::SendAll(std::span<const uint8_t> data) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Send would block, timing out");
-        DisconnectUnlocked();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Send failed", err);
-      DisconnectUnlocked();
+      std::ignore = Shutdown();
       return std::unexpected{std::error_code(err, std::system_category())};
     }
     if (n == 0) [[unlikely]] {
       if (retried_zero) [[unlikely]] {
         spw_rmap::debug::Debug("Send returned zero twice, treating as error");
-        DisconnectUnlocked();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::io_error)};
       }
       pollfd pfd{.fd = fd_, .events = POLLOUT, .revents = 0};
@@ -421,27 +435,27 @@ auto TCPClient::SendAll(std::span<const uint8_t> data) noexcept
 
       if (prc == 0) [[unlikely]] {
         spw_rmap::debug::Debug("Poll timed out after send returned zero");
-        DisconnectUnlocked();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       if (prc < 0) [[unlikely]] {
         const int poll_err = errno;
         LogErrno("Poll failed after send returned zero", poll_err);
-        DisconnectUnlocked();
+        std::ignore = Shutdown();
         return std::unexpected{
             std::error_code(poll_err, std::system_category())};
       }
       if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket error after send returned zero, treating as closed");
-        DisconnectUnlocked();
+        std::ignore = Shutdown();
         return std::unexpected{
             std::make_error_code(std::errc::connection_aborted)};
       }
       if ((pfd.revents & POLLOUT) == 0) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket not writable after send returned zero, treating as error");
-        DisconnectUnlocked();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::io_error)};
       }
       retried_zero = true;
@@ -454,10 +468,10 @@ auto TCPClient::SendAll(std::span<const uint8_t> data) noexcept
 
 auto TCPClient::RecvSome(std::span<uint8_t> buf) noexcept
     -> std::expected<size_t, std::error_code> {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
   if (buf.empty()) [[unlikely]] {
     return 0U;  // Nothing to receive
   }
+  std::lock_guard<std::mutex> receive_lock(receive_mtx_);
   if (fd_ < 0) [[unlikely]] {
     spw_rmap::debug::Debug("Not connected");
     return std::unexpected{std::make_error_code(std::errc::not_connected)};
@@ -474,11 +488,11 @@ auto TCPClient::RecvSome(std::span<uint8_t> buf) noexcept
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Receive failed", err);
-      DisconnectUnlocked();
+      std::ignore = Shutdown();
       return std::unexpected{std::error_code(err, std::system_category())};
     } else if (n == 0) [[unlikely]] {
       spw_rmap::debug::Debug("Connection closed by peer");
-      DisconnectUnlocked();
+      std::ignore = Shutdown();
       return std::unexpected{std::make_error_code(std::errc::io_error)};
     }
     return static_cast<size_t>(n);
@@ -486,17 +500,21 @@ auto TCPClient::RecvSome(std::span<uint8_t> buf) noexcept
 }
 
 auto TCPClient::Shutdown() noexcept -> std::expected<void, std::error_code> {
-  std::lock_guard<std::mutex> lock(socket_mtx_);
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   if (fd_ < 0) [[unlikely]] {
     spw_rmap::debug::Debug("Not connected");
     return std::unexpected(
         std::make_error_code(std::errc::bad_file_descriptor));
+  }
+  if (shutdown_requested_) {
+    return {};
   }
   if (::shutdown(fd_, SHUT_RDWR) < 0) [[unlikely]] {
     const int err = errno;
     LogErrno("Shutdown failed", err);
     return std::unexpected(std::error_code(err, std::generic_category()));
   }
+  shutdown_requested_ = true;
   return {};
 }
 

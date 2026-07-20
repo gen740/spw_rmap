@@ -23,11 +23,16 @@ using namespace std::chrono_literals;
  */
 class TCPClient {
  private:
-  // Serializes every operation that observes or mutates fd_.  In particular,
-  // this prevents close(2) from racing with send(2)/recv(2), after which the
-  // descriptor number could be reused for an unrelated socket.
-  std::mutex socket_mtx_;
+  // Send and receive are independent directions of a full-duplex TCP socket.
+  // Lifecycle/configuration calls must still be serialized by the application
+  // against active I/O, except that Shutdown() may interrupt a blocking receive.
+  // Automatic reconnection additionally takes send_mtx_ before lifecycle_mtx_
+  // so that the descriptor generation cannot change during SendAll().
+  std::mutex lifecycle_mtx_;
+  std::mutex send_mtx_;
+  std::mutex receive_mtx_;
   int fd_ = -1;
+  bool shutdown_requested_ = false;
 
   std::string ip_address_;
   std::string port_;

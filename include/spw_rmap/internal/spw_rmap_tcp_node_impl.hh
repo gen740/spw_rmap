@@ -18,9 +18,11 @@
 #include <utility>
 #include <vector>
 
+#include "spw_rmap/error_code.hh"
 #include "spw_rmap/internal/debug.hh"
 #include "spw_rmap/packet_builder.hh"
 #include "spw_rmap/packet_parser.hh"
+#include "spw_rmap/rmap_packet_type.hh"
 #include "spw_rmap/spw_rmap_node_base.hh"
 
 namespace spw_rmap {
@@ -157,6 +159,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     send_timeout_ = timeout;
     return tcp_backend_->SetSendTimeout(timeout);
   }
+
+  auto RequestRunLoopStop() noexcept -> void { running_.store(false); }
 
   auto ConnectLoopUntilHealthy() noexcept
       -> std::expected<void, std::error_code> {
@@ -458,6 +462,23 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         std::span(send_buf_).first(config.ExpectedSize() + 12));
   }
 
+  static auto ValidateSuccessfulReply(const Packet& packet,
+                                      PacketType expected_type) noexcept
+      -> std::expected<void, std::error_code> {
+    if (packet.type != expected_type) [[unlikely]] {
+      spw_rmap::debug::Debug("Received unexpected RMAP reply type: ",
+                             static_cast<int>(packet.type));
+      return std::unexpected{std::make_error_code(std::errc::bad_message)};
+    }
+    if (packet.status != PacketStatusCode::kCommandExecutedSuccessfully)
+        [[unlikely]] {
+      spw_rmap::debug::Debug("RMAP command failed with status: ",
+                             static_cast<int>(packet.status));
+      return std::unexpected{spw_rmap::make_error_code(packet.status)};
+    }
+    return {};
+  }
+
   auto SendReadReplyPacket(Packet packet, const std::vector<uint8_t>& data)
       -> std::expected<void, std::error_code> {
     if (data.size() != packet.data_length) [[unlikely]] {
@@ -469,11 +490,15 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     }
     auto config = ReadReplyPacketConfig{
         .reply_spw_address = packet.reply_address,
-        .initiator_logical_address = packet.target_logical_address,
-        .target_logical_address = packet.initiator_logical_address,
+        .initiator_logical_address = packet.initiator_logical_address,
+        .target_logical_address = packet.target_logical_address,
         .transaction_id = packet.transaction_id,
         .status = PacketStatusCode::kCommandExecutedSuccessfully,
-        .increment_mode = true,
+        .reply_address_length =
+            static_cast<uint8_t>(packet.instruction & 0b00000011),
+        .increment_mode =
+            (packet.instruction &
+             std::to_underlying(RMAPCommandCode::kIncrementAddress)) != 0,
         .data = data,
     };
     std::lock_guard<std::mutex> lock(send_mtx_);
@@ -503,12 +528,18 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       -> std::expected<void, std::error_code> {
     auto config = WriteReplyPacketConfig{
         .reply_spw_address = packet.reply_address,
-        .initiator_logical_address = packet.target_logical_address,
-        .target_logical_address = packet.initiator_logical_address,
+        .initiator_logical_address = packet.initiator_logical_address,
+        .target_logical_address = packet.target_logical_address,
         .transaction_id = packet.transaction_id,
         .status = PacketStatusCode::kCommandExecutedSuccessfully,
-        .increment_mode = true,
-        .verify_mode = true,
+        .reply_address_length =
+            static_cast<uint8_t>(packet.instruction & 0b00000011),
+        .increment_mode =
+            (packet.instruction &
+             std::to_underlying(RMAPCommandCode::kIncrementAddress)) != 0,
+        .verify_mode =
+            (packet.instruction &
+             std::to_underlying(RMAPCommandCode::kVerifyDataBeforeWrite)) != 0,
     };
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto send_buffer = std::span(send_buf_);
@@ -564,37 +595,18 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             }
             case PacketType::kRead: {
               if (on_read_callback_) [[likely]] {
-#ifdef __EXCEPTIONS
-                try {
-                  return SendReadReplyPacket(packet, on_read_callback_(packet));
-                } catch (const std::exception& e) {
-                  spw_rmap::debug::Debug("Exception in on_read_callback_: ",
-                                         e.what());
-                  return std::unexpected{
-                      std::make_error_code(std::errc::operation_canceled)};
-                }
-#else
                 return SendReadReplyPacket(packet, on_read_callback_(packet));
-#endif
               }
               return {};
             }
             case PacketType::kWrite: {
               if (on_write_callback_) [[likely]] {
-#ifdef __EXCEPTIONS
-                try {
-                  on_write_callback_(packet);
-                  return SendWriteReplyPacket(packet);
-                } catch (const std::exception& e) {
-                  spw_rmap::debug::Debug("Exception in on_write_callback_: ",
-                                         e.what());
-                  return std::unexpected{
-                      std::make_error_code(std::errc::operation_canceled)};
-                }
-#else
                 on_write_callback_(packet);
+                if ((packet.instruction &
+                     std::to_underlying(RMAPCommandCode::kReply)) == 0) {
+                  return {};
+                }
                 return SendWriteReplyPacket(packet);
-#endif
               }
               return {};
             }
@@ -614,11 +626,17 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     running_.store(true);
     while (running_.load()) {
       auto res = Poll();
+      if (!running_.load()) {
+        break;
+      }
       if (res.has_value()) [[likely]] {
         continue;
       }
       spw_rmap::debug::Debug("Error in poll(): ", res.error().message());
       auto ensure_res = EnsureTcpConnection();
+      if (!running_.load()) {
+        break;
+      }
       if (ensure_res.has_value()) [[likely]] {
         continue;
       }
@@ -650,9 +668,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   /**
    * @brief Enables or disables auto polling.
    *
-   * When enabled, the node runs `poll()` internally; synchronous `read`/`write`
-   * must be issued one at a time and the asynchronous APIs (`readAsync`,
-   * `writeAsync`) return `operation_not_permitted`.
+   * When enabled, synchronous Write()/Read() receive their own reply instead
+   * of relying on an external Poll()/RunLoop(). Those synchronous calls are
+   * serialized internally, and WriteAsync()/ReadAsync() return
+   * `operation_not_permitted`.
    */
   auto SetAutoPollingMode(bool enable) noexcept -> void {
     auto_polling_mode_ = enable;
@@ -661,10 +680,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   /**
    * @brief Synchronously write data to a target node.
    *
-   * When auto polling mode is enabled via `setAutoPollingMode(true)` this call
-   * must be serialized; do not issue concurrent synchronous writes because the
-   * internal poll loop can only track one outstanding transaction at a time in
-   * that mode.
+   * When auto polling mode is enabled via SetAutoPollingMode(true), concurrent
+   * synchronous calls are serialized internally because that mode can receive
+   * only one outstanding transaction at a time.
    */
   auto Write(const TargetNode& target_node, uint32_t memory_address,
              const std::span<const uint8_t> data,
@@ -700,13 +718,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   packet.transaction_id);
               return std::unexpected{make_error_code(std::errc::bad_message)};
             }
-            if (packet.type == PacketType::kWriteReply) [[likely]] {
-              CancelTransaction(static_cast<uint16_t>(transaction_id_memo));
-              return {};
-            } else {
-              return std::unexpected{
-                  std::make_error_code(std::errc::bad_message)};
+            auto validation =
+                ValidateSuccessfulReply(packet, PacketType::kWriteReply);
+            if (!validation.has_value()) [[unlikely]] {
+              return validation;
             }
+            CancelTransaction(static_cast<uint16_t>(transaction_id_memo));
+            return {};
           })
           .or_else([this, &transaction_id_memo](std::error_code ec)
                        -> std::expected<void, std::error_code> {
@@ -729,8 +747,12 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                      -> void {
                    {
                      std::lock_guard<std::mutex> lock(state->mutex);
-                     state->result =
-                         res.transform([](const Packet&) noexcept -> void {});
+                     state->result = res.and_then(
+                         [](const Packet& packet) noexcept
+                             -> std::expected<void, std::error_code> {
+                           return ValidateSuccessfulReply(
+                               packet, PacketType::kWriteReply);
+                         });
                      state->completed = true;
                    }
                    state->cv.notify_one();
@@ -752,9 +774,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   /**
    * @brief Asynchronously write data to a target node.
    *
-   * Auto polling mode disables asynchronous writes—`writeAsync` immediately
-   * returns a future containing `operation_not_permitted` when
-   * `setAutoPollingMode(true)` is active.
+   * Auto polling mode disables asynchronous writes—`WriteAsync` immediately
+   * returns an unexpected `operation_not_permitted` error when
+   * `SetAutoPollingMode(true)` is active.
+   *
+   * TCP reconnection preserves outstanding transactions. A matching reply is
+   * still dispatched by Transaction ID; otherwise the lazy timeout and
+   * cancellation rules documented by SetTransactionTimeout() apply.
    */
   auto WriteAsync(const TargetNode& target_node, uint32_t memory_address,
                   const std::span<const uint8_t> data,
@@ -768,19 +794,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return AcquireTransaction([on_complete = std::move(on_complete)](
                                   std::expected<Packet, std::error_code>
                                       result) mutable noexcept -> void {
-#ifdef __EXCEPTIONS
-             try {
-               on_complete(std::move(result));
-             } catch (const std::exception& e) {
-               spw_rmap::debug::Debug("Exception in writeAsync callback: ",
-                                      e.what());
-             } catch (...) {
-               spw_rmap::debug::Debug(
-                   "Unknown exception in writeAsync callback");
-             }
-#else
              on_complete(std::move(result));
-#endif
            })
         .and_then([this, &target_node, memory_address,
                    data](uint16_t transaction_id) noexcept
@@ -802,8 +816,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   /**
    * @brief Synchronously read data from a target node.
    *
-   * With auto polling enabled only one synchronous read may be in flight—wait
-   * for the call to finish before issuing another synchronous read/write.
+   * With auto polling enabled, concurrent synchronous Read()/Write() calls are
+   * serialized internally so that only one transaction receives at a time.
    */
   auto Read(const TargetNode& target_node, uint32_t memory_address,
             const std::span<uint8_t> data,
@@ -846,9 +860,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               return std::unexpected{
                   std::make_error_code(std::errc::bad_message)};
             }
-            if (packet.type != PacketType::kReadReply) [[unlikely]] {
-              return std::unexpected{
-                  std::make_error_code(std::errc::bad_message)};
+            auto validation =
+                ValidateSuccessfulReply(packet, PacketType::kReadReply);
+            if (!validation.has_value()) [[unlikely]] {
+              return validation;
             }
             if (packet.data_length != data.size() ||
                 packet.data.size() != data.size()) [[unlikely]] {
@@ -888,8 +903,13 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                    {
                      std::lock_guard<std::mutex> lock(state->mutex);
                      state->result = res.and_then(
-                         [&state](const Packet& packet) noexcept
+                         [state](const Packet& packet) noexcept
                              -> std::expected<void, std::error_code> {
+                           auto validation = ValidateSuccessfulReply(
+                               packet, PacketType::kReadReply);
+                           if (!validation.has_value()) [[unlikely]] {
+                             return validation;
+                           }
                            if (packet.data.size() != state->data.size())
                                [[unlikely]] {
                              return std::unexpected(
@@ -924,8 +944,12 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   /**
    * @brief Asynchronously read data from a target node.
    *
-   * When auto polling mode is active this function is unavailable and returns a
-   * future that resolves to `operation_not_permitted`.
+   * When auto polling mode is active this function returns an unexpected
+   * `operation_not_permitted` error.
+   *
+   * TCP reconnection preserves outstanding transactions. A matching reply is
+   * still dispatched by Transaction ID; otherwise the lazy timeout and
+   * cancellation rules documented by SetTransactionTimeout() apply.
    */
   auto ReadAsync(const TargetNode& target_node, uint32_t memory_address,
                  uint32_t data_length,
@@ -939,19 +963,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     return AcquireTransaction([on_complete = std::move(on_complete)](
                                   std::expected<Packet, std::error_code>
                                       result) mutable noexcept -> void {
-#ifdef __EXCEPTIONS
-             try {
-               on_complete(std::move(result));
-             } catch (const std::exception& e) {
-               spw_rmap::debug::Debug("Exception in readAsync callback: ",
-                                      e.what());
-             } catch (...) {
-               spw_rmap::debug::Debug(
-                   "Unknown exception in readAsync callback");
-             }
-#else
              on_complete(std::move(result));
-#endif
            })
         .and_then([this, &target_node, memory_address,
                    data_length](uint16_t transaction_id) noexcept

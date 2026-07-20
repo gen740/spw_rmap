@@ -67,12 +67,38 @@ class SpwRmapNodeBase {
 
   virtual auto RunLoop() -> std::expected<void, std::error_code> = 0;
 
+  /**
+   * @brief Requests a running receive loop to stop.
+   *
+   * This interrupts a blocking receive but keeps the node object alive.  Join
+   * the thread executing RunLoop() before calling Shutdown().
+   */
+  virtual auto Stop() noexcept -> std::expected<void, std::error_code> = 0;
+
+  /**
+   * @brief Registers the callback invoked for an incoming write command.
+   *
+   * The callback must not throw. It is invoked from a `noexcept` context, so
+   * throwing an exception results in `std::terminate`.
+   */
   virtual auto RegisterOnWrite(std::function<void(Packet)> on_write) noexcept
       -> void = 0;
 
+  /**
+   * @brief Registers the callback invoked for an incoming read command.
+   *
+   * The callback must not throw. It is invoked from a `noexcept` context, so
+   * throwing an exception results in `std::terminate`.
+   */
   virtual auto RegisterOnRead(
       std::function<std::vector<uint8_t>(Packet)> on_read) noexcept -> void = 0;
 
+  /**
+   * @brief Registers the callback invoked for an incoming time code.
+   *
+   * The callback must not throw. It is invoked from a `noexcept` context, so
+   * throwing an exception results in `std::terminate`.
+   */
   virtual auto RegisterOnTimeCode(
       std::function<void(uint8_t)> /* onTimeCode */) noexcept -> void {}
 
@@ -111,12 +137,22 @@ class SpwRmapNodeBase {
   /**
    * @brief Writes data to a target node asynchronously.
    *
-   * This function sends data to a specific memory address of the target node
-   * and resolves the returned future when the reply is received.
+   * This function builds and sends the command before returning its reserved
+   * transaction ID. Poll() or RunLoop() invokes the callback when the matching
+   * reply is received; with a concurrent receive loop this can happen before
+   * WriteAsync() returns.
+   *
+   * This call does not start a deadline timer. An unanswered transaction stays
+   * pending until it is cancelled or a later transaction allocation reclaims
+   * its ID after the timeout configured by SetTransactionTimeout(). Therefore,
+   * if no later transaction is allocated, its callback can remain pending even
+   * after that timeout has elapsed.
    *
    * @param logical_address Logical address of the target node.
    * @param memory_address Target memory address.
    * @param data Data to write.
+   * @param on_complete Completion callback. It must not throw; throwing from
+   *                    it results in `std::terminate`.
    */
   virtual auto WriteAsync(
       const TargetNode& target_node, uint32_t memory_address,
@@ -127,12 +163,22 @@ class SpwRmapNodeBase {
   /**
    * @brief Reads data from a target node asynchronously.
    *
-   * This function retrieves data from a specific memory address of the target
-   * node and resolves the future once the read reply is received.
+   * This function builds and sends the command before returning its reserved
+   * transaction ID. Poll() or RunLoop() invokes the callback with the parsed
+   * reply; with a concurrent receive loop this can happen before ReadAsync()
+   * returns.
+   *
+   * This call does not start a deadline timer. An unanswered transaction stays
+   * pending until it is cancelled or a later transaction allocation reclaims
+   * its ID after the timeout configured by SetTransactionTimeout(). Therefore,
+   * if no later transaction is allocated, its callback can remain pending even
+   * after that timeout has elapsed.
    *
    * @param logical_address Logical address of the target node.
    * @param memory_address Target memory address.
-   * @param data Reference to a span where the read data will be stored.
+   * @param data_length Number of bytes requested from the target.
+   * @param on_complete Completion callback. It must not throw; throwing from
+   *                    it results in `std::terminate`.
    */
   virtual auto ReadAsync(
       const TargetNode& target_node, uint32_t memory_address,
@@ -153,12 +199,18 @@ class SpwRmapNodeBase {
   /**
    * @brief Configures the timeout used by the transaction ID database.
    *
-   * Every in-flight transaction reserves a Transaction ID; when a reply takes
-   * longer than this duration the entry is considered lost and will eventually
-   * be recycled. If `read`/`write` are invoked with a timeout that exceeds this
-   * limit (non-zero timeout), the request timeout is clamped to the Transaction
-   * ID timeout to guarantee consistency. Supplying `0ms` disables automatic
-   * reclamation and clamping entirely.
+   * This timeout is a lazy Transaction ID reclamation threshold, not an active
+   * deadline timer. Expiration is checked only while allocating a later
+   * transaction. When allocation reaches an expired entry, its callback is
+   * invoked with `std::errc::timed_out` and the ID is reused. Merely allowing
+   * the configured duration to elapse does not invoke the callback; without a
+   * later allocation, the transaction remains pending.
+   *
+   * If `Read`/`Write` are invoked with a timeout that exceeds this non-zero
+   * limit, their request timeout is clamped to this value. Supplying `0ms`
+   * disables automatic reclamation and clamping entirely. Applications that
+   * require prompt asynchronous deadlines must run their own timer, complete
+   * their own operation state, and call CancelTransaction() to release the ID.
    */
   virtual auto SetTransactionTimeout(std::chrono::milliseconds timeout) noexcept
       -> void {
@@ -166,6 +218,9 @@ class SpwRmapNodeBase {
     transaction_id_database_.SetTimeout(timeout);
   }
 
+  /**
+   * @brief Releases a pending Transaction ID without invoking its callback.
+   */
   virtual auto CancelTransaction(uint16_t transaction_id) noexcept -> void {
     transaction_id_database_.Release(transaction_id);
   }
