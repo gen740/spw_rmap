@@ -13,18 +13,32 @@ Key CMake options:
 
 - `SPWRMAP_BUILD_APPS` (default `ON`): build the `spwrmap` and `spwrmap_speedtest` CLI tools.
 - `SPWRMAP_BUILD_EXAMPLES` (default `OFF`): enable examples under `examples/`.
-- `SPWRMAP_BUILD_TESTS` (default `ON`): add the `tests` subdirectory and register the GTest suite.
+- `SPWRMAP_BUILD_TESTS` (default `OFF`): add the `tests` subdirectory and register the GTest suite.
 - `SPWRMAP_BUILD_PYTHON_BINDINGS` (default `OFF`): build the pybind11 module (also enabled when using `pyproject.toml` / `scikit-build-core`).
 
 ## Testing
 
 ```bash
+cmake -S . -B build -DSPWRMAP_BUILD_TESTS=ON
 cmake --build build --target spwrmap_tests
-cd build
-ctest --output-on-failure
+ctest --test-dir build --output-on-failure
 ```
 
-Some TCP tests require the ability to bind a local port; they will be skipped automatically when the environment forbids that operation (e.g., in sandboxed CI).
+The C++ suite covers packet round trips and malformed input, CRC failures, builder bounds, synchronous and asynchronous node behavior, transaction-ID lifecycle and concurrency, TCP reconnects, and timeout behavior. Some TCP tests require the ability to bind a local port; they are skipped automatically when the environment forbids that operation.
+
+To run the same undefined-behavior checks used by CI:
+
+```bash
+cmake -S . -B build-ubsan -G Ninja \
+  -DSPWRMAP_BUILD_TESTS=ON \
+  -DSPWRMAP_BUILD_APPS=OFF \
+  -DCMAKE_CXX_FLAGS=-fsanitize=undefined \
+  -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=undefined
+cmake --build build-ubsan
+ctest --test-dir build-ubsan --output-on-failure
+```
+
+GitHub Actions runs the regular C++ suite, the UBSan suite, and Python binding smoke tests for every push and pull request.
 
 ## Python bindings
 
@@ -34,7 +48,7 @@ To build the wheel:
 python -m pip install .  # uses pyproject + scikit-build-core
 ```
 
-The resulting package exposes `_core.SpwRmapTCPNode` mirroring the C++ API.
+The resulting package exposes a synchronous subset of the C++ API through `_core.SpwRmapTCPNode`.
 
 ## Key Concepts
 
@@ -177,7 +191,19 @@ print("sync read:", list(data))
 ```
 
 Destroy the `SpwRmapTCPNode` instance (or let it go out of scope) when you are done—the underlying socket is closed automatically.
-If you prefer explicit lifecycle management, follow `examples/spwrmap_example.py`, which wraps the connection in a context manager to pair `connect()`/cleanup deterministically.
+
+## Threading and connection behavior
+
+- `TCPClient` serializes connect, disconnect, send, receive, timeout configuration, and shutdown operations around its socket descriptor. A receive timeout returns `std::errc::timed_out` without discarding an otherwise healthy TCP connection; peer closure and hard socket errors still disconnect it.
+- Auto-polling mode serializes synchronous `Read` and `Write` calls. It intentionally rejects `ReadAsync` and `WriteAsync` with `std::errc::operation_not_permitted`.
+- Outside auto-polling mode, asynchronous operations require the application to run `Poll()` or `RunLoop()` to dispatch replies. Do not run multiple polling loops for the same node.
+- `Shutdown()` ends the current client lifecycle. Calls such as `EnsureTcpConnection()` after the backend has been released return `std::errc::not_connected`.
+
+## Protocol limits
+
+- `TargetNode` supports at most 12 target-path bytes and 12 reply-path bytes.
+- RMAP command data lengths are encoded in 24 bits. Builders reject values larger than `0xFFFFFF`.
+- Builder functions return `std::errc::no_buffer_space` when the caller-provided output span is too small.
 
 ## Timeouts and Error Handling
 
@@ -185,6 +211,15 @@ If you prefer explicit lifecycle management, follow `examples/spwrmap_example.py
 
 - Asynchronous callbacks run inside the polling loop. If a function you pass to `WriteAsync` / `ReadAsync` throws, the library catches and logs the exception so the loop stays alive—wrap your callback body in your own error handling if you need to mark the operation successful despite local issues.
 
-Python bindings currently offer only synchronous `read`/`write` methods. To parallelize operations you must call them from your own threads or processes; there is no built-in async wrapper.
+Python bindings currently offer only synchronous `read`/`write` methods, do not release the GIL around blocking I/O, and provide no built-in async wrapper.
+
+## Known limitations
+
+- Python read/write timeouts are currently fixed at 100 ms, and the binding does not expose an explicit `shutdown()` method or context-manager protocol. Destruction closes the socket.
+- Synchronous C++ `Read`/`Write` validate reply type, transaction ID, and length, but currently do not convert a non-zero RMAP reply status into an error. Async users can inspect `Packet::status` directly.
+- `Packet` payload and address fields are non-owning spans into parser or receive buffers. Callbacks must copy data they need to retain after the callback returns.
+- Auto-resizing receive buffers trust the frame length advertised by the TCP peer; deployments that accept untrusted peers should use a fixed buffer policy until a configurable maximum frame size is added.
+- Span and initializer-list address setters on `TargetNode` require the caller to respect the 12-byte limit; this is enforced by an assertion in debug builds.
+- CI uses loopback TCP peers and synthetic RMAP frames. Hardware-in-the-loop coverage, parser fuzzing, and ThreadSanitizer coverage are not yet included.
 
 The [examples](examples) directory contains CLI programs that parse command-line arguments, manage the lifecycle for you, and show additional patterns (speed tests, multi-target setups, etc.).

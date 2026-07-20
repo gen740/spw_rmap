@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -64,6 +65,39 @@ static void close_fd_retry(int fd) {
   do {
     r = ::close(fd);
   } while (r < 0 && errno == EINTR);
+}
+
+TEST(TcpClient, DisconnectedOperationsReturnStableErrors) {
+  TCPClient client("127.0.0.1", "1");
+  std::array<uint8_t, 1> byte{0x42};
+
+  auto send_result = client.SendAll(byte);
+  ASSERT_FALSE(send_result.has_value());
+  EXPECT_EQ(send_result.error(),
+            std::make_error_code(std::errc::not_connected));
+
+  auto receive_result = client.RecvSome(byte);
+  ASSERT_FALSE(receive_result.has_value());
+  EXPECT_EQ(receive_result.error(),
+            std::make_error_code(std::errc::not_connected));
+
+  auto shutdown_result = client.Shutdown();
+  ASSERT_FALSE(shutdown_result.has_value());
+  EXPECT_EQ(shutdown_result.error(),
+            std::make_error_code(std::errc::bad_file_descriptor));
+
+  client.Disconnect();
+  client.Disconnect();
+}
+
+TEST(TcpClient, EmptyReceiveIsANoOpWithoutConnection) {
+  TCPClient client("127.0.0.1", "1");
+  std::span<uint8_t> empty;
+
+  auto result = client.RecvSome(empty);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, 0U);
 }
 
 TEST(TcpClientServer, ServerRecieve) {
@@ -233,6 +267,77 @@ TEST(TcpClientServer, ClientRecieve) {
   }
   EXPECT_FALSE(server_emit_error)
       << "Server thread emitted an error during execution.";
+}
+
+TEST(TcpClientServer, ReceiveTimeoutKeepsConnectionOpen) {
+  uint16_t port = 0;
+  try {
+    port = pick_free_port();
+  } catch (const std::system_error& e) {
+    if (e.code() == std::errc::operation_not_permitted) {
+      GTEST_SKIP() << "Skipping due to sandbox restriction: " << e.what();
+    }
+    throw;
+  }
+
+  const int listen_fd = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+  ASSERT_GE(listen_fd, 0);
+  int yes = 1;
+  ASSERT_EQ(
+      ::setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes)), 0);
+  sockaddr_in sin{};
+  sin.sin_family = AF_INET;
+  sin.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  sin.sin_port = htons(port);
+  ASSERT_EQ(::bind(listen_fd, reinterpret_cast<sockaddr*>(&sin), sizeof(sin)),
+            0);
+  ASSERT_EQ(::listen(listen_fd, 1), 0);
+
+  std::optional<std::string> server_error;
+  std::thread server_thread([&]() -> void {
+    const int client_fd = ::accept(listen_fd, nullptr, nullptr);
+    if (client_fd < 0) {
+      server_error = std::error_code(errno, std::system_category()).message();
+      return;
+    }
+    std::this_thread::sleep_for(100ms);
+    constexpr uint8_t reply = 0x5A;
+    if (::send(client_fd, &reply, sizeof(reply), 0) !=
+        static_cast<ssize_t>(sizeof(reply))) {
+      server_error = std::error_code(errno, std::system_category()).message();
+    }
+    close_fd_retry(client_fd);
+  });
+  struct ServerCleanup {
+    int listen_fd;
+    std::thread& thread;
+    ~ServerCleanup() {
+      if (thread.joinable()) {
+        thread.join();
+      }
+      close_fd_retry(listen_fd);
+    }
+  } cleanup{listen_fd, server_thread};
+
+  TCPClient client("127.0.0.1", std::to_string(port));
+  ASSERT_TRUE(client.Connect(500ms).has_value());
+  ASSERT_TRUE(client.SetReceiveTimeout(20ms).has_value());
+
+  std::array<uint8_t, 1> received{};
+  auto timeout_result = client.RecvSome(received);
+  ASSERT_FALSE(timeout_result.has_value());
+  EXPECT_EQ(timeout_result.error(), std::make_error_code(std::errc::timed_out));
+
+  ASSERT_TRUE(client.SetReceiveTimeout(500ms).has_value());
+  auto receive_result = client.RecvSome(received);
+  ASSERT_TRUE(receive_result.has_value()) << receive_result.error().message();
+  EXPECT_EQ(*receive_result, 1U);
+  EXPECT_EQ(received[0], 0x5A);
+
+  client.Disconnect();
+  server_thread.join();
+  EXPECT_FALSE(server_error.has_value())
+      << (server_error ? *server_error : std::string{});
 }
 
 TEST(TcpClientServer, ConnectReconnectsAfterDrop) {

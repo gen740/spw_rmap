@@ -24,6 +24,7 @@ target = TargetNode(
 )
 
 node = SpwRmapTCPNode(ip_address="192.168.1.100", port="10030")
+node.connect()
 
 node.write(target, 0x44A200D4, [0, 0, 0, 1])
 data = node.read(target, 0x44A200D0, 4)
@@ -33,8 +34,9 @@ print(list(data))
 - `TargetNode` represents the destination node (logical address, hop list, and return path).
 - `SpwRmapTCPNode` owns the SpaceWire-over-TCP connection and performs the request/reply handshake.
 - Calls are synchronous: they block until a reply frame is parsed or the default timeout elapses. Catch the raised exception to handle transport or timeout errors explicitly.
+- Blocking calls currently keep the Python GIL; the binding does not provide an asyncio or parallel-thread wrapper.
 
-Destroy the node (or let it go out of scope) to close the TCP connection. For deterministic teardown, wrap it in a context manager as shown in `examples/spwrmap_example.py` so `connect()` and cleanup stay paired.
+Destroy the node (or let it go out of scope) to close the TCP connection. The current Python binding does not expose an explicit `shutdown()` method or context-manager protocol.
 
 ## Building from source
 
@@ -45,3 +47,13 @@ python -m pip install .
 ```
 
 The build steps mirror the ones documented in the root `README.md`. The `pyspw_rmap` wheel bundles the Python module, the C++ extension, and the CLI entry points, so no extra copy steps are required after `pip` finishes.
+
+## Testing a source build
+
+After installing the checkout, run the binding smoke tests with:
+
+```bash
+python -m unittest tests/test_python_bindings.py
+```
+
+These tests cover module import, target-node field conversion, client construction, and the debug-control functions. They do not require a SpaceWire-over-TCP server.

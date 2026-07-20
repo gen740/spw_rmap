@@ -106,6 +106,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         config_(config) {}
 
   auto EnsureTcpConnection() noexcept -> std::expected<void, std::error_code> {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
     return tcp_backend_->EnsureConnect().and_then(
         [this]() -> std::expected<void, std::error_code> {
           return tcp_backend_->SetSendTimeout(send_timeout_);
@@ -313,7 +316,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             return std::unexpected{
                 std::make_error_code(std::errc::bad_message)};
           }
-          on_timecode_callback_(tc[0] & 0x3F);
+          if (on_timecode_callback_) [[likely]] {
+            on_timecode_callback_(tc[0] & 0x3F);
+          }
         } break;
         default:
           spw_rmap::debug::Debug("Received packet with unknown type byte: ",

@@ -52,10 +52,10 @@ auto ParseReadPacket(Packet& packet,
   packet.transaction_id |= (data[head++] << 0);
   packet.extended_address = data[head++];
   packet.address = 0;
-  packet.address |= (data[head++] << 24);
-  packet.address |= (data[head++] << 16);
-  packet.address |= (data[head++] << 8);
-  packet.address |= (data[head++] << 0);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 24);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 16);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 8);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 0);
   packet.data_length = 0;
   packet.data_length |= (data[head++] << 16);
   packet.data_length |= (data[head++] << 8);
@@ -143,10 +143,10 @@ auto ParseWritePacket(Packet& packet,
   packet.transaction_id |= (data[head++] << 0);
   packet.extended_address = data[head++];
   packet.address = 0;
-  packet.address |= (data[head++] << 24);
-  packet.address |= (data[head++] << 16);
-  packet.address |= (data[head++] << 8);
-  packet.address |= (data[head++] << 0);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 24);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 16);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 8);
+  packet.address |= (static_cast<uint32_t>(data[head++]) << 0);
   packet.data_length = 0;
   packet.data_length |= (data[head++] << 16);
   packet.data_length |= (data[head++] << 8);
@@ -190,6 +190,9 @@ auto ParseWriteReplyPacket(Packet& packet,
 
 auto ParseRMAPPacket(const std::span<const uint8_t> data) noexcept
     -> std::expected<Packet, std::error_code> {
+  if (data.empty()) [[unlikely]] {
+    return std::unexpected(make_error_code(RMAPParseStatus::kIncompletePacket));
+  }
   Packet packet{};
   size_t head = 0;
   // Parse target SpaceWire address

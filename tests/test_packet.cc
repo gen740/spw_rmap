@@ -3,8 +3,10 @@
 #include <gtest/gtest.h>
 
 #include <random>
+#include <spw_rmap/error_code.hh>
 #include <spw_rmap/packet_builder.hh>
 #include <spw_rmap/packet_parser.hh>
+#include <system_error>
 
 #include "spw_rmap/target_node.hh"
 
@@ -270,4 +272,141 @@ TEST(spw_rmap, WriteReplyPacket) {
     EXPECT_EQ(d.type, PacketType::kWriteReply);
     EXPECT_EQ(d.instruction & 0b00000100, c.increment_mode ? 0b00000100 : 0);
   }
+}
+
+TEST(spw_rmap, ParserRejectsEmptyAndTruncatedPackets) {
+  using namespace spw_rmap;
+
+  auto empty = ParseRMAPPacket({});
+  ASSERT_FALSE(empty.has_value());
+  EXPECT_EQ(empty.error(), make_error_code(RMAPParseStatus::kIncompletePacket));
+
+  std::array<uint8_t, 1> reply_address{0x01};
+  auto config = WriteReplyPacketConfig{
+      .reply_spw_address = reply_address,
+      .initiator_logical_address = 0xFE,
+      .target_logical_address = 0x34,
+      .transaction_id = 0x1234,
+  };
+  std::vector<uint8_t> packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildWriteReplyPacket(config, packet).has_value());
+
+  for (std::size_t size = 0; size < packet.size(); ++size) {
+    auto result = ParseRMAPPacket(std::span(packet).first(size));
+    EXPECT_FALSE(result.has_value()) << "accepted prefix of size " << size;
+  }
+}
+
+TEST(spw_rmap, ParserRejectsCorruptedHeaderCrc) {
+  using namespace spw_rmap;
+
+  std::array<uint8_t, 1> reply_address{0x01};
+  auto config = WriteReplyPacketConfig{
+      .reply_spw_address = reply_address,
+      .initiator_logical_address = 0xFE,
+      .target_logical_address = 0x34,
+      .transaction_id = 0x1234,
+  };
+  std::vector<uint8_t> packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildWriteReplyPacket(config, packet).has_value());
+  packet[reply_address.size() + 3] ^= 0x01;
+
+  auto result = ParseRMAPPacket(packet);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), make_error_code(RMAPParseStatus::kHeaderCrcError));
+}
+
+TEST(spw_rmap, ParserRejectsCorruptedDataCrc) {
+  using namespace spw_rmap;
+
+  std::array<uint8_t, 1> reply_address{0x01};
+  std::array<uint8_t, 4> data{0x12, 0x34, 0x56, 0x78};
+  auto config = ReadReplyPacketConfig{
+      .reply_spw_address = reply_address,
+      .initiator_logical_address = 0xFE,
+      .target_logical_address = 0x34,
+      .transaction_id = 0x1234,
+      .data = data,
+  };
+  std::vector<uint8_t> packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildReadReplyPacket(config, packet).has_value());
+  packet.back() ^= 0x01;
+
+  auto result = ParseRMAPPacket(packet);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), make_error_code(RMAPParseStatus::kDataCrcError));
+}
+
+TEST(spw_rmap, ParserRoundTripsMaximumAddress) {
+  using namespace spw_rmap;
+
+  auto config = ReadPacketConfig{};
+  config.target_logical_address = 0x34;
+  config.initiator_logical_address = 0xFE;
+  config.transaction_id = 0xFFFF;
+  config.address = 0xFFFF'FFFFU;
+  config.data_length = 0x00FF'FFFFU;
+  std::vector<uint8_t> packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildReadPacket(config, packet).has_value());
+
+  auto result = ParseRMAPPacket(packet);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->address, config.address);
+  EXPECT_EQ(result->data_length, config.data_length);
+}
+
+TEST(spw_rmap, BuildersRejectUndersizedOutputBuffers) {
+  using namespace spw_rmap;
+
+  std::array<uint8_t, 2> data{0x12, 0x34};
+  auto read = ReadPacketConfig{};
+  auto write = WritePacketConfig{};
+  write.data = data;
+  auto read_reply = ReadReplyPacketConfig{};
+  read_reply.data = data;
+  auto write_reply = WriteReplyPacketConfig{};
+
+  const auto expect_no_space = [](auto config, auto builder) {
+    std::vector<uint8_t> output(config.ExpectedSize() - 1);
+    auto result = builder(config, output);
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), std::make_error_code(std::errc::no_buffer_space));
+  };
+
+  expect_no_space(read, BuildReadPacket);
+  expect_no_space(write, BuildWritePacket);
+  expect_no_space(read_reply, BuildReadReplyPacket);
+  expect_no_space(write_reply, BuildWriteReplyPacket);
+}
+
+TEST(spw_rmap, CommandBuildersRejectUnencodableFields) {
+  using namespace spw_rmap;
+
+  std::array<uint8_t, 13> oversized_reply_address{};
+  auto read = ReadPacketConfig{};
+  read.reply_address = oversized_reply_address;
+  std::vector<uint8_t> read_output(read.ExpectedSize());
+  auto read_result = BuildReadPacket(read, read_output);
+  ASSERT_FALSE(read_result.has_value());
+  EXPECT_EQ(read_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+
+  auto write = WritePacketConfig{};
+  write.reply_address = oversized_reply_address;
+  std::vector<uint8_t> write_output(write.ExpectedSize());
+  auto write_result = BuildWritePacket(write, write_output);
+  ASSERT_FALSE(write_result.has_value());
+  EXPECT_EQ(write_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+
+  auto excessive_length = ReadPacketConfig{};
+  excessive_length.data_length = 0x0100'0000U;
+  std::vector<uint8_t> length_output(excessive_length.ExpectedSize());
+  auto length_result = BuildReadPacket(excessive_length, length_output);
+  ASSERT_FALSE(length_result.has_value());
+  EXPECT_EQ(length_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
 }

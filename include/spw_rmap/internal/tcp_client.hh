@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <system_error>
@@ -22,6 +23,10 @@ using namespace std::chrono_literals;
  */
 class TCPClient {
  private:
+  // Serializes every operation that observes or mutates fd_.  In particular,
+  // this prevents close(2) from racing with send(2)/recv(2), after which the
+  // descriptor number could be reused for an unrelated socket.
+  std::mutex socket_mtx_;
   int fd_ = -1;
 
   std::string ip_address_;
@@ -29,6 +34,9 @@ class TCPClient {
   std::optional<std::chrono::microseconds> last_send_timeout_{};
   std::optional<std::chrono::microseconds> last_receive_timeout_{};
 
+  [[nodiscard]] auto ConnectUnlocked(std::chrono::microseconds timeout) noexcept
+      -> std::expected<void, std::error_code>;
+  auto DisconnectUnlocked() noexcept -> void;
   auto ResetTimeoutCache() noexcept -> void;
 
  public:

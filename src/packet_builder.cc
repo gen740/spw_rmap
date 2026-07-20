@@ -14,6 +14,10 @@ namespace spw_rmap {
 auto BuildReadPacket(const ReadPacketConfig& config,
                      std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
+  if (config.reply_address.size() > 12 || config.data_length > 0x00FF'FFFFU)
+      [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
     spw_rmap::debug::Debug("ReadPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
@@ -32,7 +36,6 @@ auto BuildReadPacket(const ReadPacketConfig& config,
     instruction |= std::to_underlying(RMAPCommandCode::kIncrementAddress);
   }
   if (reply_address_size != 0) {
-    assert(reply_address_size <= 12);
     reply_address_size = ((reply_address_size - 1) & 0x0C) + 0x04;
     instruction |= (reply_address_size >> 2);
   }
@@ -68,6 +71,10 @@ auto BuildReadPacket(const ReadPacketConfig& config,
 auto BuildWritePacket(const WritePacketConfig& config,
                       std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
+  if (config.reply_address.size() > 12 || config.data.size() > 0x00FF'FFFFU)
+      [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
     spw_rmap::debug::Debug("WritePacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
@@ -94,7 +101,6 @@ auto BuildWritePacket(const WritePacketConfig& config,
       instruction |= std::to_underlying(RMAPCommandCode::kIncrementAddress);
     }
     if (reply_address_size != 0) {
-      assert(reply_address_size <= 12);
       reply_address_size =
           ((reply_address_size - 1) & 0x0C) + 0x04;  // Convert to 4-byte words
       instruction |= (reply_address_size >> 2);

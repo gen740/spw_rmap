@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <expected>
+#include <mutex>
 #include <thread>
 
 #include "spw_rmap/transaction_database.hh"
@@ -74,6 +75,76 @@ TEST(TransactionDatabaseTest, TimeoutInvokesCallbackWithError) {
   }
   EXPECT_NE(std::ranges::find(later_ids, *id), later_ids.end());
   EXPECT_TRUE(timed_out.load());
+}
+
+TEST(TransactionDatabaseTest, ExhaustionReturnsResourceUnavailable) {
+  spw_rmap::TransactionDatabase db(0x10, 0x13);
+
+  ASSERT_TRUE(db.Acquire().has_value());
+  ASSERT_TRUE(db.Acquire().has_value());
+  ASSERT_TRUE(db.Acquire().has_value());
+  auto exhausted = db.Acquire();
+
+  ASSERT_FALSE(exhausted.has_value());
+  EXPECT_EQ(exhausted.error(),
+            std::make_error_code(std::errc::resource_unavailable_try_again));
+}
+
+TEST(TransactionDatabaseTest, InvalidReleaseDoesNotCorruptCapacity) {
+  spw_rmap::TransactionDatabase db(0x10, 0x12);
+
+  db.Release(0x0F);
+  db.Release(0x12);
+
+  EXPECT_TRUE(db.Acquire().has_value());
+  EXPECT_TRUE(db.Acquire().has_value());
+  EXPECT_FALSE(db.Acquire().has_value());
+}
+
+TEST(TransactionDatabaseTest, ReplyCallbackCanOnlyBeInvokedOnce) {
+  spw_rmap::TransactionDatabase db(0x20, 0x22);
+  std::atomic<int> callback_count{0};
+  auto id = db.Acquire([&callback_count](auto) -> void { ++callback_count; });
+  ASSERT_TRUE(id.has_value());
+  spw_rmap::Packet packet{};
+  packet.transaction_id = *id;
+
+  EXPECT_TRUE(db.InvokeReplyCallback(*id, packet));
+  EXPECT_FALSE(db.InvokeReplyCallback(*id, packet));
+  EXPECT_EQ(callback_count.load(), 1);
+}
+
+TEST(TransactionDatabaseTest, ConcurrentAcquireReturnsUniqueIds) {
+  constexpr int kThreadCount = 32;
+  spw_rmap::TransactionDatabase db(0, kThreadCount);
+  std::mutex results_mutex;
+  std::vector<uint16_t> ids;
+  std::vector<std::error_code> errors;
+  std::vector<std::thread> threads;
+  ids.reserve(kThreadCount);
+  threads.reserve(kThreadCount);
+
+  for (int i = 0; i < kThreadCount; ++i) {
+    threads.emplace_back([&]() -> void {
+      auto result = db.Acquire();
+      std::lock_guard<std::mutex> lock(results_mutex);
+      if (result.has_value()) {
+        ids.push_back(*result);
+      } else {
+        errors.push_back(result.error());
+      }
+    });
+  }
+  for (auto& thread : threads) {
+    thread.join();
+  }
+
+  ASSERT_TRUE(errors.empty());
+  ASSERT_EQ(ids.size(), static_cast<std::size_t>(kThreadCount));
+  std::ranges::sort(ids);
+  EXPECT_EQ(std::ranges::unique(ids).begin(), ids.end());
+  EXPECT_EQ(ids.front(), 0);
+  EXPECT_EQ(ids.back(), kThreadCount - 1);
 }
 
 }  // namespace
