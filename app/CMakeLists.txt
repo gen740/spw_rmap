@@ -6,6 +6,13 @@ set_target_properties(spwrmap_cli PROPERTIES OUTPUT_NAME spwrmap)
 add_executable(spwrmap_speedtest_cli spwrmap_speedtest.cc)
 target_compile_options(spwrmap_speedtest_cli PRIVATE $<$<CONFIG:Release>:-O3>)
 target_link_libraries(spwrmap_speedtest_cli PRIVATE spw_rmap)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  # pthread_setaffinity_np is provided through the POSIX threads link mode on
+  # manylinux aarch64.  GCC does not enable that mode merely because <pthread.h>
+  # was included.
+  target_compile_options(spwrmap_speedtest_cli PRIVATE -pthread)
+  target_link_options(spwrmap_speedtest_cli PRIVATE -pthread)
+endif()
 target_compile_features(spwrmap_speedtest_cli PRIVATE cxx_std_23)
 set_target_properties(spwrmap_speedtest_cli PROPERTIES
                       OUTPUT_NAME spwrmap_speedtest)

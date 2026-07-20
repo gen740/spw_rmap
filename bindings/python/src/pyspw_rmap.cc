@@ -123,9 +123,7 @@ PYBIND11_MODULE(_core, m) {
 
   m.def(
       "set_debug_enabled",
-      [](bool enabled) -> void {
-        spw_rmap::debug::SetRuntimeEnabled(enabled);
-      },
+      [](bool enabled) -> void { spw_rmap::debug::SetRuntimeEnabled(enabled); },
       py::arg("enabled"), "Enable or disable runtime debug logging");
   m.def(
       "enable_debug", []() -> void { spw_rmap::debug::Enable(); },
