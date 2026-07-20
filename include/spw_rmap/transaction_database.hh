@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -23,8 +22,7 @@ class TransactionDatabase {
       : id_min_(id_min),
         id_max_(id_max),
         next_id_(id_min),
-        entries_(id_max - id_min) {
-    assert(id_max_ > id_min_);
+        entries_(id_max > id_min ? id_max - id_min : 0) {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
       auto& entry = entries_[i];
       entry.transaction_id = static_cast<uint16_t>(id_min_ + i);
@@ -33,6 +31,7 @@ class TransactionDatabase {
     }
   }
 
+  // The valid range is half-open: [id_min_, id_max_).
   [[nodiscard]] constexpr auto Contains(uint16_t transaction_id) const noexcept
       -> bool {
     return transaction_id >= id_min_ && transaction_id < id_max_;

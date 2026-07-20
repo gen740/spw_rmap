@@ -147,4 +147,50 @@ TEST(TransactionDatabaseTest, ConcurrentAcquireReturnsUniqueIds) {
   EXPECT_EQ(ids.back(), kThreadCount - 1);
 }
 
+TEST(TransactionDatabaseTest, InvalidRangesCreateSafeEmptyDatabase) {
+  for (const auto [minimum, maximum] :
+       {std::pair<uint16_t, uint16_t>{5, 5}, {6, 5}}) {
+    spw_rmap::TransactionDatabase db(minimum, maximum);
+
+    auto result = db.Acquire();
+
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(),
+              std::make_error_code(std::errc::resource_unavailable_try_again));
+  }
+}
+
+TEST(TransactionDatabaseTest, ZeroTimeoutDisablesReclamation) {
+  spw_rmap::TransactionDatabase db(0x10, 0x11);
+  db.SetTimeout(std::chrono::milliseconds::zero());
+  std::atomic<bool> callback_called{false};
+  ASSERT_TRUE(db.Acquire([&callback_called](auto) -> void {
+                  callback_called = true;
+                }).has_value());
+  std::this_thread::sleep_for(std::chrono::milliseconds(2));
+
+  auto result = db.Acquire();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_FALSE(callback_called.load());
+}
+
+TEST(TransactionDatabaseTest, ConcurrentReplyAndReleaseAreSafe) {
+  for (int iteration = 0; iteration < 100; ++iteration) {
+    spw_rmap::TransactionDatabase db(0, 1);
+    std::atomic<int> callback_count{0};
+    auto id = db.Acquire([&callback_count](auto) -> void { ++callback_count; });
+    ASSERT_TRUE(id.has_value());
+    spw_rmap::Packet packet{};
+    std::thread invoke_thread(
+        [&]() -> void { std::ignore = db.InvokeReplyCallback(*id, packet); });
+    std::thread release_thread([&]() -> void { db.Release(*id); });
+    invoke_thread.join();
+    release_thread.join();
+
+    EXPECT_LE(callback_count.load(), 1);
+    EXPECT_TRUE(db.Acquire().has_value());
+  }
+}
+
 }  // namespace

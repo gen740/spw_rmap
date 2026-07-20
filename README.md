@@ -14,6 +14,8 @@ Key CMake options:
 - `SPWRMAP_BUILD_APPS` (default `ON`): build the `spwrmap` and `spwrmap_speedtest` CLI tools.
 - `SPWRMAP_BUILD_EXAMPLES` (default `OFF`): enable examples under `examples/`.
 - `SPWRMAP_BUILD_TESTS` (default `OFF`): add the `tests` subdirectory and register the GTest suite.
+- `SPWRMAP_BUILD_FUZZERS` (default `OFF`): build Clang/libFuzzer targets with AddressSanitizer and UBSan instrumentation.
+- `SPWRMAP_ENABLE_TSAN` (default `OFF`): instrument the library and tests with ThreadSanitizer using Clang or GCC.
 - `SPWRMAP_BUILD_PYTHON_BINDINGS` (default `OFF`): build the pybind11 module (also enabled when using `pyproject.toml` / `scikit-build-core`).
 
 ## Testing
@@ -38,7 +40,34 @@ cmake --build build-ubsan
 ctest --test-dir build-ubsan --output-on-failure
 ```
 
-GitHub Actions runs the regular C++ suite, the UBSan suite, and Python binding smoke tests for every push and pull request.
+To check the supported concurrent paths for data races:
+
+```bash
+cmake -S . -B build-tsan -G Ninja \
+  -DSPWRMAP_BUILD_TESTS=ON \
+  -DSPWRMAP_BUILD_APPS=OFF \
+  -DSPWRMAP_ENABLE_TSAN=ON
+cmake --build build-tsan
+TSAN_OPTIONS=halt_on_error=1 \
+  ctest --test-dir build-tsan --output-on-failure
+```
+
+ThreadSanitizer runtime support depends on the compiler and operating system; CI runs this configuration with Clang on Linux.
+
+To build and run the RMAP packet-parser fuzzer:
+
+```bash
+cmake -S . -B build-fuzz -G Ninja \
+  -DCMAKE_CXX_COMPILER=clang++ \
+  -DSPWRMAP_BUILD_APPS=OFF \
+  -DSPWRMAP_BUILD_FUZZERS=ON
+cmake --build build-fuzz --target parse_rmap_packet_fuzz
+build-fuzz/fuzz/parse_rmap_packet_fuzz \
+  -max_total_time=30 -timeout=2 -max_len=65536 \
+  -dict=fuzz/rmap.dict fuzz/corpus
+```
+
+GitHub Actions runs the regular C++ suite, UBSan, TSan, the parser fuzzer, and Python binding smoke tests for every push and pull request.
 
 ## Python bindings
 
@@ -67,10 +96,7 @@ See `examples/spwrmap_example_sync.cc`, `examples/spwrmap_example_async.cc` (C++
 
 ```cpp
 #include <chrono>
-#include <expected>
-#include <memory>
-#include <thread>
-#include <vector>
+#include <system_error>
 
 #include <spw_rmap/spw_rmap_tcp_node.hh>
 #include <spw_rmap/target_node.hh>
@@ -82,28 +108,19 @@ int main() {
       {.ip_address = "127.0.0.1", .port = "10030"});
 
   client.SetInitiatorLogicalAddress(0xFE);
+  client.SetAutoPollingMode(true);
   client.Connect(500ms).value();  // abort on failure
 
-  std::thread loop([&client] {
-    auto res = client.RunLoop();
-    if (!res) {
-      throw std::system_error(res.error());
-    }
-  });
-
-  // ...
+  // Issue synchronous Read/Write calls on this thread.
 
   auto shutdown_res = client.Shutdown();
   if (!shutdown_res.has_value()) {
     throw std::system_error(shutdown_res.error());
   }
-  if (loop.joinable()) {
-    loop.join();
-  }
 }
 ```
 
-You can also call `Poll()` manually from your own loop instead of spawning a thread.
+For asynchronous operation, submit `ReadAsync`/`WriteAsync` calls and use exactly one polling loop to dispatch their replies. Follow the concurrency contract below.
 
 ### Creating target node
 
@@ -194,15 +211,28 @@ Destroy the `SpwRmapTCPNode` instance (or let it go out of scope) when you are d
 
 ## Threading and connection behavior
 
-- `TCPClient` serializes connect, disconnect, send, receive, timeout configuration, and shutdown operations around its socket descriptor. A receive timeout returns `std::errc::timed_out` without discarding an otherwise healthy TCP connection; peer closure and hard socket errors still disconnect it.
-- Auto-polling mode serializes synchronous `Read` and `Write` calls. It intentionally rejects `ReadAsync` and `WriteAsync` with `std::errc::operation_not_permitted`.
-- Outside auto-polling mode, asynchronous operations require the application to run `Poll()` or `RunLoop()` to dispatch replies. Do not run multiple polling loops for the same node.
-- `Shutdown()` ends the current client lifecycle. Calls such as `EnsureTcpConnection()` after the backend has been released return `std::errc::not_connected`.
+The library is not unconditionally thread-safe. The supported combinations are:
+
+| Operations on one node | Concurrent use | Conditions |
+|---|---|---|
+| `Read` / `Write` in auto-polling mode | Supported | Calls are serialized internally. Do not call `Poll`, `RunLoop`, `ReadAsync`, or `WriteAsync` in this mode. |
+| `ReadAsync` / `WriteAsync` / `EmitTimeCode` | Supported | Auto-polling must be off, the connection and configuration must remain unchanged, and caller-owned input objects must remain valid for each call. Transaction allocation and outgoing frame construction are serialized internally. |
+| One `Poll` or `RunLoop` plus asynchronous requests or non-auto-polling `Read` / `Write` | Limited support | Use exactly one receive loop. The current `TCPClient` socket lock can delay a send while a blocking receive owns the descriptor lock, so this is not a general full-duplex thread-safety guarantee. |
+| Two or more `Poll` / `RunLoop` calls | Not supported | They share one receive buffer and one TCP byte stream. |
+| `RegisterOnRead`, `RegisterOnWrite`, or `RegisterOnTimeCode` while polling | Not supported | Register callbacks before starting the receive loop. |
+| `Connect`, `Shutdown`, `SetSendTimeout`, `SetTransactionTimeout`, `SetAutoPollingMode`, logical-address/verify-mode setters, or endpoint setters while requests or polling are active | Not supported | Treat these as lifecycle/configuration operations and serialize them at application level. |
+| Concurrent access to the same caller-owned `TargetNode`, input span, or output span | Not supported | Use immutable inputs or separate external synchronization. |
+| Any concurrent `TCPServer` socket operations | Not supported | Serialize accept, send, receive, configuration, and shutdown at application level. |
+
+Internally, `TCPClient` protects its descriptor lifetime, `TransactionDatabase` protects transaction allocation/completion, and the node protects outgoing frame construction. Those mutexes provide the specific guarantees above; they do not make the whole object safe for arbitrary concurrent calls. A receive timeout returns `std::errc::timed_out` without discarding an otherwise healthy TCP connection; peer closure and hard socket errors still disconnect it.
+
+`Shutdown()` ends the current client lifecycle. After shutdown, calls such as `EnsureTcpConnection()` return `std::errc::not_connected`; do not race shutdown against another node operation.
 
 ## Protocol limits
 
 - `TargetNode` supports at most 12 target-path bytes and 12 reply-path bytes.
 - RMAP command data lengths are encoded in 24 bits. Builders reject values larger than `0xFFFFFF`.
+- Auto-resizing receive buffers reject accumulated frame payload larger than `SpwRmapTCPNodeConfig::max_receive_frame_size` (16 MiB plus 256 bytes by default). Lower this limit when peers are untrusted or application packets are known to be smaller.
 - Builder functions return `std::errc::no_buffer_space` when the caller-provided output span is too small.
 
 ## Timeouts and Error Handling
@@ -218,8 +248,8 @@ Python bindings currently offer only synchronous `read`/`write` methods, do not 
 - Python read/write timeouts are currently fixed at 100 ms, and the binding does not expose an explicit `shutdown()` method or context-manager protocol. Destruction closes the socket.
 - Synchronous C++ `Read`/`Write` validate reply type, transaction ID, and length, but currently do not convert a non-zero RMAP reply status into an error. Async users can inspect `Packet::status` directly.
 - `Packet` payload and address fields are non-owning spans into parser or receive buffers. Callbacks must copy data they need to retain after the callback returns.
-- Auto-resizing receive buffers trust the frame length advertised by the TCP peer; deployments that accept untrusted peers should use a fixed buffer policy until a configurable maximum frame size is added.
+- The internal `TCPServer` backend requires its owner to serialize accept, send, receive, and shutdown calls. Unlike `TCPClient`, it does not yet protect socket lifecycle operations with a mutex.
 - Span and initializer-list address setters on `TargetNode` require the caller to respect the 12-byte limit; this is enforced by an assertion in debug builds.
-- CI uses loopback TCP peers and synthetic RMAP frames. Hardware-in-the-loop coverage, parser fuzzing, and ThreadSanitizer coverage are not yet included.
+- CI uses loopback TCP peers and synthetic RMAP frames. Hardware-in-the-loop coverage is not yet included.
 
 The [examples](examples) directory contains CLI programs that parse command-line arguments, manage the lifecycle for you, and show additional patterns (speed tests, multi-target setups, etc.).

@@ -6,9 +6,34 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 option(SPWRMAP_BUILD_APPS "Build command line applications" ON)
 option(SPWRMAP_BUILD_EXAMPLES "Build examples" OFF)
 option(SPWRMAP_BUILD_TESTS "Build tests" OFF)
+option(SPWRMAP_BUILD_FUZZERS "Build libFuzzer targets" OFF)
 option(SPWRMAP_ENABLE_DEBUG_LOGS "Enable debug logging helpers" ON)
+option(SPWRMAP_ENABLE_TSAN "Enable ThreadSanitizer instrumentation" OFF)
+
+if(SPWRMAP_ENABLE_TSAN AND SPWRMAP_BUILD_FUZZERS)
+  message(
+    FATAL_ERROR
+      "ThreadSanitizer and libFuzzer sanitizers cannot be enabled together")
+endif()
+
+if(SPWRMAP_ENABLE_TSAN)
+  if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
+    message(FATAL_ERROR "SPWRMAP_ENABLE_TSAN requires Clang or GCC")
+  endif()
+  add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=thread)
+endif()
+
+if(SPWRMAP_BUILD_FUZZERS AND NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  message(FATAL_ERROR "SPWRMAP_BUILD_FUZZERS requires Clang with libFuzzer")
+endif()
 
 add_library(${PROJECT_NAME} STATIC)
+if(SPWRMAP_BUILD_FUZZERS)
+  target_compile_options(
+    ${PROJECT_NAME} PRIVATE -fsanitize=fuzzer-no-link,address,undefined
+                            -fno-omit-frame-pointer)
+endif()
 if(SPWRMAP_ENABLE_DEBUG_LOGS)
   target_compile_definitions(${PROJECT_NAME} PUBLIC SPW_RMAP_DEBUG=1)
 else()
@@ -28,6 +53,10 @@ endif()
 if(SPWRMAP_BUILD_TESTS)
   enable_testing()
   add_subdirectory(tests)
+endif()
+
+if(SPWRMAP_BUILD_FUZZERS)
+  add_subdirectory(fuzz)
 endif()
 
 if(SPWRMAP_BUILD_PYTHON_BINDINGS)

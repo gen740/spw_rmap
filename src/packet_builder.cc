@@ -2,7 +2,6 @@
 // Licensed under the MIT License. See LICENSE file for details.
 #include "spw_rmap/packet_builder.hh"
 
-#include <cassert>
 #include <utility>
 
 #include "spw_rmap/crc.hh"
@@ -22,7 +21,7 @@ auto BuildReadPacket(const ReadPacketConfig& config,
     spw_rmap::debug::Debug("ReadPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
-  auto head = 0;
+  size_t head = 0;
   for (const auto& byte : config.target_spw_address) {
     out[head++] = byte;
   }
@@ -79,7 +78,7 @@ auto BuildWritePacket(const WritePacketConfig& config,
     spw_rmap::debug::Debug("WritePacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
-  auto head = 0;
+  size_t head = 0;
   for (const auto& byte : config.target_spw_address) {
     out[head++] = (byte);
   }
@@ -148,11 +147,14 @@ auto BuildWritePacket(const WritePacketConfig& config,
 auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
                           std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
+  if (config.data.size() > 0x00FF'FFFFU) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
     spw_rmap::debug::Debug("ReadReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
-  auto head = 0;
+  size_t head = 0;
   for (const auto& byte : config.reply_spw_address) {
     out[head++] = (byte);
   }
@@ -196,7 +198,7 @@ auto BuildWriteReplyPacket(const WriteReplyPacketConfig& config,
     spw_rmap::debug::Debug("WriteReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
-  auto head = 0;
+  size_t head = 0;
   for (const auto& byte : config.reply_spw_address) {
     out[head++] = (byte);
   }

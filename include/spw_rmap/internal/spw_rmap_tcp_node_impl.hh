@@ -9,6 +9,7 @@
 #include <cstring>
 #include <functional>
 #include <future>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -42,6 +43,8 @@ struct SpwRmapTCPNodeConfig {
   uint16_t transaction_id_max = 0x00FF;
   BufferPolicy buffer_policy = BufferPolicy::kAutoResize;
   std::chrono::microseconds send_timeout = std::chrono::milliseconds{500};
+  // Caps accumulated frame payload before an auto-resizing allocation.
+  size_t max_receive_frame_size = 0x0100'0100;
 };
 
 namespace internal {
@@ -74,6 +77,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   std::vector<uint8_t> send_buf_ = {};
   BufferPolicy buffer_policy_ = BufferPolicy::kAutoResize;
   std::chrono::microseconds send_timeout_{std::chrono::milliseconds{500}};
+  size_t max_receive_frame_size_{0x0100'0100};
 
   std::atomic<bool> running_{false};
 
@@ -81,7 +85,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     // No-op
   };
   std::function<std::vector<uint8_t>(Packet)> on_read_callback_ =
-      [](Packet packet) noexcept -> std::vector<uint8_t> {
+      [](Packet packet) -> std::vector<uint8_t> {
     std::vector<uint8_t> empty;
     empty.resize(packet.data_length);
     return empty;
@@ -103,6 +107,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         send_buf_(config.send_buffer_size),
         buffer_policy_(config.buffer_policy),
         send_timeout_(config.send_timeout),
+        max_receive_frame_size_(config.max_receive_frame_size),
         config_(config) {}
 
   auto EnsureTcpConnection() noexcept -> std::expected<void, std::error_code> {
@@ -193,8 +198,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       spw_rmap::debug::Debug("Header size less than 12 bytes");
       return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
     }
-    std::ignore /* extra_length */ = (static_cast<uint16_t>(header[2]) << 8) |
-                                     (static_cast<uint16_t>(header[3]) << 0);
     uint64_t data_length = ((static_cast<uint64_t>(header[4]) << 56) |
                             (static_cast<uint64_t>(header[5]) << 48) |
                             (static_cast<uint64_t>(header[6]) << 40) |
@@ -203,7 +206,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                             (static_cast<uint64_t>(header[9]) << 16) |
                             (static_cast<uint64_t>(header[10]) << 8) |
                             (static_cast<uint64_t>(header[11]) << 0));
-    return data_length;
+    if (data_length > std::numeric_limits<size_t>::max()) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::value_too_large)};
+    }
+    return static_cast<size_t>(data_length);
   }
 
   struct AsyncOperation {
@@ -248,6 +254,12 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
       if (*data_length == 0) [[unlikely]] {
         spw_rmap::debug::Debug("Received packet with zero data length");
         return std::unexpected{std::make_error_code(std::errc::bad_message)};
+      }
+      if (total_size > max_receive_frame_size_ ||
+          *data_length > max_receive_frame_size_ - total_size) [[unlikely]] {
+        spw_rmap::debug::Debug(
+            "Incoming packet exceeds the configured maximum frame size");
+        return std::unexpected{std::make_error_code(std::errc::message_size)};
       }
       if (*data_length > recv_buffer.size()) [[unlikely]] {
         if (buffer_policy_ == BufferPolicy::kFixed) {
@@ -403,16 +415,6 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                              res.error().message());
       return std::unexpected{res.error()};
     }
-    if (send_buffer.size() < config.ExpectedSize() + 12) [[unlikely]] {
-      if (buffer_policy_ == BufferPolicy::kFixed) {
-        spw_rmap::debug::Debug("Send buffer too small for Read Packet");
-        return std::unexpected{
-            std::make_error_code(std::errc::no_buffer_space)};
-      } else {
-        send_buf_.resize(config.ExpectedSize() + 12);
-        send_buffer = std::span(send_buf_);
-      }
-    }
     SetHeader(config.ExpectedSize());
     return tcp_backend_->SendAll(
         std::span(send_buf_).first(config.ExpectedSize() + 12));
@@ -459,8 +461,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   auto SendReadReplyPacket(Packet packet, const std::vector<uint8_t>& data)
       -> std::expected<void, std::error_code> {
     if (data.size() != packet.data_length) [[unlikely]] {
-      std::cerr << "on_read_callback_ returned data with incorrect length: "
-                << data.size() << " (expected " << packet.data_length << ")\n";
+      spw_rmap::debug::Debug(
+          "on_read_callback_ returned data with incorrect length: " +
+          std::to_string(data.size()) + " (expected " +
+          std::to_string(packet.data_length) + ")");
       return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
     }
     auto config = ReadReplyPacketConfig{
@@ -520,8 +524,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     auto build_res =
         spw_rmap::BuildWriteReplyPacket(config, send_buffer.subspan(12));
     if (!build_res.has_value()) [[unlikely]] {
-      std::cerr << "Failed to build Write Reply Packet: "
-                << build_res.error().message() << "\n";
+      spw_rmap::debug::Debug("Failed to build Write Reply Packet: ",
+                             build_res.error().message());
       return std::unexpected{build_res.error()};
     }
     SetHeader(config.ExpectedSize());
@@ -552,8 +556,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
               const auto handled = GetTransactionDatabase().InvokeReplyCallback(
                   packet.transaction_id, packet);
               if (!handled) [[unlikely]] {
-                std::cerr << "No callback registered for Transaction ID: "
-                          << packet.transaction_id << "\n";
+                spw_rmap::debug::Debug(
+                    "No callback registered for Transaction ID: ",
+                    packet.transaction_id);
               }
               return {};
             }
@@ -711,31 +716,32 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             return std::unexpected{ec};
           });
     } else {
-      auto write_res = std::expected<void, std::error_code>{};
-      std::mutex write_mtx;
-      std::condition_variable write_cv;
-      bool write_completed = false;
-      return WriteAsync(target_node, memory_address, data,
-                        [&write_res, &write_completed, &write_mtx, &write_cv](
-                            std::expected<Packet, std::error_code> res) noexcept
-                            -> void {
-                          {
-                            std::unique_lock<std::mutex> lock(write_mtx);
-                            write_res = res.transform(
-                                [](const Packet&) noexcept -> void {});
-                            write_completed = true;
-                          }
-                          write_cv.notify_one();
-                        })
-          .and_then([this, &write_res, &write_completed, &write_mtx, &write_cv,
-                     timeout](uint16_t transaction_id) noexcept
+      struct WriteState {
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::expected<void, std::error_code> result{};
+        bool completed{false};
+      };
+      auto state = std::make_shared<WriteState>();
+      return WriteAsync(
+                 target_node, memory_address, data,
+                 [state](std::expected<Packet, std::error_code> res) noexcept
+                     -> void {
+                   {
+                     std::lock_guard<std::mutex> lock(state->mutex);
+                     state->result =
+                         res.transform([](const Packet&) noexcept -> void {});
+                     state->completed = true;
+                   }
+                   state->cv.notify_one();
+                 })
+          .and_then([this, state, timeout](uint16_t transaction_id) noexcept
                         -> std::expected<void, std::error_code> {
-            std::unique_lock<std::mutex> lock(write_mtx);
-            if (write_cv.wait_for(lock, ClampTransactionTimeout(timeout),
-                                  [&write_completed] -> auto {
-                                    return write_completed;
-                                  })) [[likely]] {
-              return write_res;
+            std::unique_lock<std::mutex> lock(state->mutex);
+            if (state->cv.wait_for(
+                    lock, ClampTransactionTimeout(timeout),
+                    [&state] -> bool { return state->completed; })) [[likely]] {
+              return state->result;
             }
             CancelTransaction(transaction_id);
             return std::unexpected{std::make_error_code(std::errc::timed_out)};
@@ -865,42 +871,49 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             return std::unexpected{ec};
           });
     } else {
-      auto read_res = std::expected<void, std::error_code>{};
-      std::mutex read_mtx;
-      std::condition_variable read_cv;
-      bool read_completed = false;
+      struct ReadState {
+        explicit ReadState(std::size_t size) : data(size) {}
+        std::mutex mutex;
+        std::condition_variable cv;
+        std::expected<void, std::error_code> result{};
+        std::vector<uint8_t> data;
+        bool completed{false};
+      };
+      auto state = std::make_shared<ReadState>(data.size());
       return ReadAsync(
                  target_node, memory_address,
                  static_cast<uint32_t>(data.size()),
-                 [&data, &read_res, &read_completed, &read_mtx,
-                  &read_cv](std::expected<Packet, std::error_code> res) noexcept
+                 [state](std::expected<Packet, std::error_code> res) noexcept
                      -> void {
                    {
-                     std::unique_lock<std::mutex> lock(read_mtx);
-                     read_res = res.and_then(
-                         [&data](const Packet& packet) noexcept
+                     std::lock_guard<std::mutex> lock(state->mutex);
+                     state->result = res.and_then(
+                         [&state](const Packet& packet) noexcept
                              -> std::expected<void, std::error_code> {
-                           if (packet.data.size() != data.size()) [[unlikely]] {
+                           if (packet.data.size() != state->data.size())
+                               [[unlikely]] {
                              return std::unexpected(
                                  std::make_error_code(std::errc::bad_message));
-                           } else {
-                             std::ranges::copy(packet.data, data.begin());
                            }
+                           std::ranges::copy(packet.data, state->data.begin());
                            return {};
                          });
-                     read_completed = true;
+                     state->completed = true;
                    }
-                   read_cv.notify_one();
+                   state->cv.notify_one();
                  })
-          .and_then([this, &read_res, &read_completed, &read_mtx, &read_cv,
+          .and_then([this, state, &data,
                      timeout](uint16_t transaction_id) noexcept
                         -> std::expected<void, std::error_code> {
-            std::unique_lock<std::mutex> lock(read_mtx);
-            if (read_cv.wait_for(lock, ClampTransactionTimeout(timeout),
-                                 [&read_completed] -> auto {
-                                   return read_completed;
-                                 })) [[likely]] {
-              return read_res;
+            std::unique_lock<std::mutex> lock(state->mutex);
+            if (state->cv.wait_for(
+                    lock, ClampTransactionTimeout(timeout),
+                    [&state] -> bool { return state->completed; })) [[likely]] {
+              if (!state->result.has_value()) [[unlikely]] {
+                return std::unexpected{state->result.error()};
+              }
+              std::ranges::copy(state->data, data.begin());
+              return {};
             }
             CancelTransaction(transaction_id);
             return std::unexpected{std::make_error_code(std::errc::timed_out)};
@@ -962,8 +975,8 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     std::lock_guard<std::mutex> lock(send_mtx_);
     std::array<uint8_t, 14> packet{};
     packet[0] = 0x30;
-    packet[11] = 0x02;  // reserved
-    packet[12] = timecode;
+    packet[11] = 0x02;  // payload length
+    packet[12] = timecode & 0x3F;
     packet[13] = 0x00;
     return tcp_backend_->SendAll(packet);
   }

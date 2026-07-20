@@ -249,6 +249,9 @@ auto TCPServer::AcceptOnce() noexcept -> std::expected<void, std::error_code> {
                   }());
                   return std::unexpected{ec};
                 });
+    if (last.has_value()) [[likely]] {
+      break;
+    }
   }
   ::freeaddrinfo(res);
   if (client_fd_ < 0) [[unlikely]] {

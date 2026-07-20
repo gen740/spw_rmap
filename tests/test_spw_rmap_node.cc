@@ -9,6 +9,8 @@
 #include <expected>
 #include <mutex>
 #include <span>
+#include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "spw_rmap/internal/spw_rmap_tcp_node_impl.hh"
@@ -137,6 +139,10 @@ class TestNode : public spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend> {
     Backend().EnqueueIncoming(frame);
   }
 
+  [[nodiscard]] auto SentFrames() -> const std::vector<std::vector<uint8_t>>& {
+    return Backend().SentFrames();
+  }
+
   auto Shutdown() noexcept -> std::expected<void, std::error_code> override {
     auto result = Backend().Shutdown();
     if (result.has_value()) {
@@ -155,9 +161,10 @@ class TestNode : public spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend> {
   auto Backend() -> MockBackend& { return *GetBackend(); }
 };
 
-auto MakeFrame(std::span<const uint8_t> payload) -> std::vector<uint8_t> {
+auto MakeFrame(std::span<const uint8_t> payload, uint8_t type = 0x00)
+    -> std::vector<uint8_t> {
   std::vector<uint8_t> frame(12 + payload.size());
-  frame[0] = 0x00;
+  frame[0] = type;
   frame[1] = 0x00;
   frame[2] = 0x00;
   frame[3] = 0x00;
@@ -204,6 +211,19 @@ auto BuildReadReplyFrame(uint16_t transaction_id, std::span<const uint8_t> data)
   };
   std::vector<uint8_t> payload(config.ExpectedSize());
   EXPECT_TRUE(spw_rmap::BuildReadReplyPacket(config, payload).has_value());
+  return MakeFrame(payload);
+}
+
+auto BuildReadCommandFrame(uint16_t transaction_id, uint32_t data_length)
+    -> std::vector<uint8_t> {
+  auto config = spw_rmap::ReadPacketConfig{};
+  config.target_logical_address = 0x34;
+  config.initiator_logical_address = 0xFE;
+  config.transaction_id = transaction_id;
+  config.address = 0x1000;
+  config.data_length = data_length;
+  std::vector<uint8_t> payload(config.ExpectedSize());
+  EXPECT_TRUE(spw_rmap::BuildReadPacket(config, payload).has_value());
   return MakeFrame(payload);
 }
 
@@ -362,6 +382,151 @@ TEST(SpwRmapTCPNodeImplTest, FixedReceiveBufferRejectsOversizedFrame) {
 
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), std::make_error_code(std::errc::no_buffer_space));
+}
+
+TEST(SpwRmapTCPNodeImplTest, AutoResizeRejectsFrameAboveConfiguredMaximum) {
+  auto config = MakeNodeConfig();
+  config.recv_buffer_size = 8;
+  config.max_receive_frame_size = 8;
+  config.buffer_policy = spw_rmap::BufferPolicy::kAutoResize;
+  TestNode node(config);
+  std::array<uint8_t, 12> header{};
+  header[0] = 0x00;
+  header[11] = 0x09;
+  node.EnqueueIncoming(std::vector<uint8_t>(header.begin(), header.end()));
+
+  auto result = node.Poll();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), std::make_error_code(std::errc::message_size));
+}
+
+TEST(SpwRmapTCPNodeImplTest, ContinuedFramesAreReassembled) {
+  TestNode node(MakeNodeConfig());
+  std::atomic<bool> callback_called{false};
+  auto target_node = spw_rmap::TargetNode(0x34);
+  std::array<uint8_t, 1> data{0x12};
+  auto transaction = node.WriteAsync(target_node, 0x1000, data,
+                                     [&callback_called](auto result) -> void {
+                                       callback_called = result.has_value();
+                                     });
+  ASSERT_TRUE(transaction.has_value());
+  auto complete_frame = BuildWriteReplyFrame(*transaction);
+  auto payload = std::span(complete_frame).subspan(12);
+  const auto split = payload.size() / 2;
+  node.EnqueueIncoming(MakeFrame(payload.first(split), 0x02));
+  node.EnqueueIncoming(MakeFrame(payload.subspan(split), 0x00));
+
+  auto result = node.Poll();
+
+  EXPECT_TRUE(result.has_value()) << result.error().message();
+  EXPECT_TRUE(callback_called.load());
+}
+
+TEST(SpwRmapTCPNodeImplTest, IgnoredFrameDoesNotConsumeFollowingPacket) {
+  TestNode node(MakeNodeConfig());
+  std::atomic<bool> callback_called{false};
+  auto target_node = spw_rmap::TargetNode(0x34);
+  std::array<uint8_t, 1> data{0x12};
+  auto transaction = node.WriteAsync(target_node, 0x1000, data,
+                                     [&callback_called](auto result) -> void {
+                                       callback_called = result.has_value();
+                                     });
+  ASSERT_TRUE(transaction.has_value());
+  std::array<uint8_t, 3> ignored{0xAA, 0xBB, 0xCC};
+  node.EnqueueIncoming(MakeFrame(ignored, 0x01));
+  node.EnqueueIncoming(BuildWriteReplyFrame(*transaction));
+
+  auto result = node.Poll();
+
+  EXPECT_TRUE(result.has_value()) << result.error().message();
+  EXPECT_TRUE(callback_called.load());
+}
+
+TEST(SpwRmapTCPNodeImplTest, InvalidTimecodePayloadIsRejected) {
+  TestNode node(MakeNodeConfig());
+  auto frame = MakeTimecodeFrame(0x15);
+  frame[13] = 0x01;
+  node.EnqueueIncoming(frame);
+
+  auto result = node.Poll();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), std::make_error_code(std::errc::bad_message));
+}
+
+TEST(SpwRmapTCPNodeImplTest, ReservedHeaderByteIsRejected) {
+  TestNode node(MakeNodeConfig());
+  auto frame = BuildWriteReplyFrame(0);
+  frame[1] = 0x01;
+  node.EnqueueIncoming(frame);
+
+  auto result = node.Poll();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), std::make_error_code(std::errc::bad_message));
+}
+
+TEST(SpwRmapTCPNodeImplTest, ReadCallbackExceptionIsReported) {
+  TestNode node(MakeNodeConfig());
+  node.RegisterOnRead([](spw_rmap::Packet) -> std::vector<uint8_t> {
+    throw std::runtime_error("callback failure");
+  });
+  node.EnqueueIncoming(BuildReadCommandFrame(0, 4));
+
+  auto result = node.Poll();
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            std::make_error_code(std::errc::operation_canceled));
+}
+
+TEST(SpwRmapTCPNodeImplTest, EmitTimecodeMasksUpperBits) {
+  TestNode node(MakeNodeConfig());
+
+  ASSERT_TRUE(node.EmitTimeCode(0xD5).has_value());
+
+  ASSERT_EQ(node.SentFrames().size(), 1U);
+  const auto& frame = node.SentFrames().front();
+  ASSERT_EQ(frame.size(), 14U);
+  EXPECT_EQ(frame[11], 0x02);
+  EXPECT_EQ(frame[12], 0x15);
+  EXPECT_EQ(frame[13], 0x00);
+}
+
+TEST(SpwRmapTCPNodeImplTest,
+     ConcurrentRequestsAndTimecodesSerializeOutgoingFrames) {
+  TestNode node(MakeNodeConfig());
+  const auto target_node = spw_rmap::TargetNode(0x34);
+  const std::array<uint8_t, 1> data{0x42};
+  constexpr std::size_t kOperationsPerThread = 64;
+  std::atomic<std::size_t> failures{0};
+
+  auto submit_requests = [&]() -> void {
+    for (std::size_t i = 0; i < kOperationsPerThread; ++i) {
+      auto result = node.WriteAsync(target_node, 0x1000, data, [](auto) {});
+      if (!result.has_value()) {
+        ++failures;
+      }
+    }
+  };
+  auto emit_timecodes = [&]() -> void {
+    for (std::size_t i = 0; i < kOperationsPerThread; ++i) {
+      if (!node.EmitTimeCode(static_cast<uint8_t>(i)).has_value()) {
+        ++failures;
+      }
+    }
+  };
+
+  std::thread first_request_thread(submit_requests);
+  std::thread second_request_thread(submit_requests);
+  std::thread timecode_thread(emit_timecodes);
+  first_request_thread.join();
+  second_request_thread.join();
+  timecode_thread.join();
+
+  EXPECT_EQ(failures.load(), 0U);
+  EXPECT_EQ(node.SentFrames().size(), kOperationsPerThread * 3);
 }
 
 TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {

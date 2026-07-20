@@ -20,6 +20,8 @@ namespace spw_rmap::internal {
  *
  * This TCPServer is supposed to be used for RMAP communication over TCP.
  * This server accepts a single connection at a time.
+ * Calls that access the socket must be serialized by the owner; this class is
+ * not safe for concurrent send, receive, accept, and shutdown operations.
  */
 class TCPServer {
  private:

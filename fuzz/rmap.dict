@@ -1,0 +1,8 @@
+protocol_identifier="\x01"
+read_command="\x4c"
+write_command="\x6c"
+read_reply="\x0c"
+write_reply="\x2c"
+zero_length="\x00\x00\x00"
+maximum_length="\xff\xff\xff"
+

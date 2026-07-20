@@ -8,6 +8,7 @@
 #include <spw_rmap/packet_parser.hh>
 #include <system_error>
 
+#include "spw_rmap/crc.hh"
 #include "spw_rmap/target_node.hh"
 
 auto RandomLogicalAddress() {
@@ -409,4 +410,99 @@ TEST(spw_rmap, CommandBuildersRejectUnencodableFields) {
   ASSERT_FALSE(length_result.has_value());
   EXPECT_EQ(length_result.error(),
             std::make_error_code(std::errc::invalid_argument));
+}
+
+TEST(spw_rmap, ReadReplyBuilderRejectsUnencodableDataLength) {
+  using namespace spw_rmap;
+
+  std::vector<uint8_t> oversized_data(0x0100'0000U);
+  auto config = ReadReplyPacketConfig{};
+  config.data = oversized_data;
+
+  auto result = BuildReadReplyPacket(config, {});
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), std::make_error_code(std::errc::invalid_argument));
+}
+
+TEST(spw_rmap, ParserRejectsUnknownProtocolWithValidCrc) {
+  using namespace spw_rmap;
+
+  std::array<uint8_t, 1> reply_address{0x01};
+  auto config = WriteReplyPacketConfig{
+      .reply_spw_address = reply_address,
+      .initiator_logical_address = 0xFE,
+      .target_logical_address = 0x34,
+      .transaction_id = 0x1234,
+  };
+  std::vector<uint8_t> packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildWriteReplyPacket(config, packet).has_value());
+  packet[reply_address.size() + 1] = 0x02;
+  packet.back() = crc::CalcCrc(std::span(packet).subspan(
+      reply_address.size(), packet.size() - reply_address.size() - 1));
+
+  auto result = ParseRMAPPacket(packet);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            make_error_code(RMAPParseStatus::kUnknownProtocolIdentifier));
+}
+
+TEST(spw_rmap, EmptyReadReplyDataRoundTrips) {
+  using namespace spw_rmap;
+
+  auto config = ReadReplyPacketConfig{};
+  config.initiator_logical_address = 0xFE;
+  config.target_logical_address = 0x34;
+  config.transaction_id = 0x1234;
+  std::vector<uint8_t> packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildReadReplyPacket(config, packet).has_value());
+
+  auto result = ParseRMAPPacket(packet);
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(result->data_length, 0U);
+  EXPECT_TRUE(result->data.empty());
+}
+
+TEST(spw_rmap, ReadReplyRejectsDeclaredLengthMismatch) {
+  using namespace spw_rmap;
+
+  std::array<uint8_t, 4> data{1, 2, 3, 4};
+  auto config = ReadReplyPacketConfig{};
+  config.initiator_logical_address = 0xFE;
+  config.target_logical_address = 0x34;
+  config.transaction_id = 0x1234;
+  config.data = data;
+  std::vector<uint8_t> packet(config.ExpectedSize());
+  ASSERT_TRUE(BuildReadReplyPacket(config, packet).has_value());
+  packet[10] = 5;
+  packet[11] = crc::CalcCrc(std::span(packet).first(11));
+
+  auto result = ParseRMAPPacket(packet);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            make_error_code(RMAPParseStatus::kIncompletePacket));
+}
+
+TEST(spw_rmap, ReplyAddressPaddingRoundTripsEveryLength) {
+  using namespace spw_rmap;
+
+  for (std::size_t length = 1; length <= TargetNode::kMaxAddressLen; ++length) {
+    std::vector<uint8_t> reply_address(length);
+    for (std::size_t i = 0; i < length; ++i) {
+      reply_address[i] = static_cast<uint8_t>(i + 1);
+    }
+    auto config = ReadPacketConfig{};
+    config.target_logical_address = 0x34;
+    config.reply_address = reply_address;
+    std::vector<uint8_t> packet(config.ExpectedSize());
+    ASSERT_TRUE(BuildReadPacket(config, packet).has_value());
+
+    auto result = ParseRMAPPacket(packet);
+
+    ASSERT_TRUE(result.has_value()) << "reply length " << length;
+    EXPECT_TRUE(SpanEqual(result->reply_address, config.reply_address));
+  }
 }

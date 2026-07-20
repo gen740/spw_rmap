@@ -44,6 +44,51 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+  cpp-tsan:
+    runs-on: ubuntu-24.04
+    env:
+      TSAN_OPTIONS: halt_on_error=1
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang libgtest-dev ninja-build
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DSPWRMAP_ENABLE_TSAN=ON
+          -DSPWRMAP_BUILD_APPS=OFF
+          -DSPWRMAP_BUILD_TESTS=ON
+      - name: Build
+        run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+  parser-fuzz:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang ninja-build
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++
+          -DSPWRMAP_BUILD_APPS=OFF
+          -DSPWRMAP_BUILD_FUZZERS=ON
+      - name: Build
+        run: cmake --build build --parallel --target parse_rmap_packet_fuzz
+      - name: Fuzz parser
+        run: >-
+          build/fuzz/parse_rmap_packet_fuzz
+          -max_total_time=30
+          -timeout=2
+          -max_len=65536
+          -dict=fuzz/rmap.dict
+          fuzz/corpus
+
   python-smoke:
     runs-on: ubuntu-24.04
     steps:
