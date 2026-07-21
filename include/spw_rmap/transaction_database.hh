@@ -22,7 +22,9 @@ class TransactionDatabase {
       : id_min_(id_min),
         id_max_(id_max),
         next_id_(id_min),
-        entries_(id_max > id_min ? id_max - id_min : 0) {
+        entries_(id_max >= id_min
+                     ? static_cast<std::size_t>(id_max) - id_min + 1
+                     : 0) {
     for (std::size_t i = 0; i < entries_.size(); ++i) {
       auto& entry = entries_[i];
       entry.transaction_id = static_cast<uint16_t>(id_min_ + i);
@@ -31,10 +33,10 @@ class TransactionDatabase {
     }
   }
 
-  // The valid range is half-open: [id_min_, id_max_).
+  // The valid range is inclusive: [id_min_, id_max_].
   [[nodiscard]] constexpr auto Contains(uint16_t transaction_id) const noexcept
       -> bool {
-    return transaction_id >= id_min_ && transaction_id < id_max_;
+    return transaction_id >= id_min_ && transaction_id <= id_max_;
   }
 
   auto SetTimeout(std::chrono::milliseconds timeout) noexcept -> void {
@@ -49,8 +51,8 @@ class TransactionDatabase {
       {
         std::unique_lock<std::mutex> lock(mutex_);
         auto& entry = entries_[next_id_ - id_min_];
-        next_id_++;
-        if (next_id_ >= id_max_) {
+        ++next_id_;
+        if (next_id_ > id_max_) {
           next_id_ = id_min_;
         }
         const bool has_callback = static_cast<bool>(entry.callback);
@@ -128,9 +130,9 @@ class TransactionDatabase {
     return &entries_[transaction_id - id_min_];
   }
 
-  uint16_t id_min_;
-  uint16_t id_max_;
-  uint16_t next_id_;
+  uint32_t id_min_;
+  uint32_t id_max_;
+  uint32_t next_id_;
   std::chrono::milliseconds timeout_{std::chrono::seconds(1)};
   std::vector<Entry> entries_;
   std::mutex mutex_;

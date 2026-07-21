@@ -2,6 +2,7 @@
 // Licensed under the MIT License. See LICENSE file for details.
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -27,7 +28,10 @@ class TCPServer {
   int listen_fd_ = -1;  // listening socket
   int client_fd_ = -1;  // accepted client socket
   bool shutdown_requested_{false};
+  std::atomic<bool> accept_abort_{false};
+  std::atomic<bool> accept_in_progress_{false};
 
+  std::mutex accept_mtx_;
   std::mutex lifecycle_mtx_;
   std::mutex send_mtx_;
   std::mutex receive_mtx_;

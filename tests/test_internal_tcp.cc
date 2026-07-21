@@ -91,6 +91,31 @@ TEST(TcpClient, DisconnectedOperationsReturnStableErrors) {
   client.Disconnect();
 }
 
+TEST(TcpServer, ShutdownInterruptsPendingAccept) {
+  uint16_t port = 0;
+  try {
+    port = pick_free_port();
+  } catch (const std::system_error& e) {
+    if (e.code() == std::errc::operation_not_permitted) {
+      GTEST_SKIP() << "Skipping due to sandbox restriction: " << e.what();
+    }
+    throw;
+  }
+  TCPServer server("127.0.0.1", std::to_string(port));
+  auto accept_future =
+      std::async(std::launch::async, [&server] { return server.AcceptOnce(); });
+  std::this_thread::sleep_for(20ms);
+
+  auto shutdown_result = server.Shutdown();
+
+  ASSERT_TRUE(shutdown_result.has_value()) << shutdown_result.error().message();
+  ASSERT_EQ(accept_future.wait_for(250ms), std::future_status::ready);
+  auto accept_result = accept_future.get();
+  ASSERT_FALSE(accept_result.has_value());
+  EXPECT_EQ(accept_result.error(),
+            std::make_error_code(std::errc::operation_canceled));
+}
+
 TEST(TcpClient, EmptyReceiveIsANoOpWithoutConnection) {
   TCPClient client("127.0.0.1", "1");
   std::span<uint8_t> empty;

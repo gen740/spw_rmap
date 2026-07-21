@@ -86,6 +86,9 @@ auto ParseReadReplyPacket(Packet& packet,
   if (data.size() < header_size) [[unlikely]] {
     return std::unexpected(make_error_code(RMAPParseStatus::kIncompletePacket));
   }
+  if (status_byte != 0 && data.size() != header_size) [[unlikely]] {
+    return std::unexpected(make_error_code(RMAPParseStatus::kIncompletePacket));
+  }
   if (crc::CalcCrc(data.subspan(0, header_size)) != 0x00) [[unlikely]] {
     return std::unexpected(make_error_code(RMAPParseStatus::kHeaderCrcError));
   }

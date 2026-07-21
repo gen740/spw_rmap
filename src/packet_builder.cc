@@ -10,6 +10,19 @@
 
 namespace spw_rmap {
 
+namespace {
+
+auto IsValidPathAddress(std::span<const uint8_t> address) noexcept -> bool {
+  for (const auto byte : address) {
+    if (byte >= 0x20) [[unlikely]] {
+      return false;
+    }
+  }
+  return true;
+}
+
+}  // namespace
+
 auto BuildReadPacket(const ReadPacketConfig& config,
                      std::span<uint8_t> out) noexcept
     -> std::expected<size_t, std::error_code> {
@@ -20,6 +33,10 @@ auto BuildReadPacket(const ReadPacketConfig& config,
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
     spw_rmap::debug::Debug("ReadPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
+  }
+  if (!IsValidPathAddress(config.target_spw_address) ||
+      config.target_logical_address < 0x20) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
   size_t head = 0;
   for (const auto& byte : config.target_spw_address) {
@@ -77,6 +94,10 @@ auto BuildWritePacket(const WritePacketConfig& config,
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
     spw_rmap::debug::Debug("WritePacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
+  }
+  if (!IsValidPathAddress(config.target_spw_address) ||
+      config.target_logical_address < 0x20) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
   size_t head = 0;
   for (const auto& byte : config.target_spw_address) {
@@ -155,6 +176,9 @@ auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
     spw_rmap::debug::Debug("ReadReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
   }
+  if (!IsValidPathAddress(config.reply_spw_address)) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
   size_t head = 0;
   for (const auto& byte : config.reply_spw_address) {
     out[head++] = (byte);
@@ -211,6 +235,9 @@ auto BuildWriteReplyPacket(const WriteReplyPacketConfig& config,
   if (out.size() < config.ExpectedSize()) [[unlikely]] {
     spw_rmap::debug::Debug("WriteReplyPacketBuilder::build: Buffer too small");
     return std::unexpected{std::make_error_code(std::errc::no_buffer_space)};
+  }
+  if (!IsValidPathAddress(config.reply_spw_address)) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
   }
   size_t head = 0;
   for (const auto& byte : config.reply_spw_address) {

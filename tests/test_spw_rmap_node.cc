@@ -311,7 +311,7 @@ auto MakeNodeConfig() -> spw_rmap::SpwRmapTCPNodeConfig {
 TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
   TestNode node(MakeNodeConfig());
   auto target_node = spw_rmap::TargetNode(0x34)
-                         .SetTargetAddress(0x20, 0x30)
+                         .SetTargetAddress(0x02, 0x03)
                          .SetReplyAddress(0x10, 0x11);
 
   std::array<uint8_t, 4> payload{0xAA, 0xBB, 0xCC, 0xDD};
@@ -335,6 +335,33 @@ TEST(SpwRmapTCPNodeImplTest, WriteAsyncCompletesAfterPoll) {
   ASSERT_TRUE(poll_result.has_value());
 
   EXPECT_TRUE(callback_called.load());
+}
+
+TEST(SpwRmapTCPNodeImplTest, AsyncOperationsRejectEmptyCompletionCallback) {
+  TestNode node(MakeNodeConfig());
+  auto target_node = spw_rmap::TargetNode(0x34);
+  const std::array<uint8_t, 1> payload{0x12};
+
+  auto write_result = node.WriteAsync(target_node, 0x1000, payload, {});
+  auto read_result = node.ReadAsync(target_node, 0x1000, 1, {});
+
+  ASSERT_FALSE(write_result.has_value());
+  EXPECT_EQ(write_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+  ASSERT_FALSE(read_result.has_value());
+  EXPECT_EQ(read_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+}
+
+TEST(SpwRmapTCPNodeImplTest, ReadRejectsUnencodableDataLength) {
+  TestNode node(MakeNodeConfig());
+  auto target_node = spw_rmap::TargetNode(0x34);
+  std::vector<uint8_t> data(0x0100'0000U);
+
+  auto result = node.Read(target_node, 0x1000, data);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), std::make_error_code(std::errc::invalid_argument));
 }
 
 TEST(SpwRmapTCPNodeImplTest, EnsureConnectionAfterShutdownBackendIsSafe) {
@@ -569,6 +596,8 @@ TEST(SpwRmapTCPNodeImplTest, TimecodeWithoutCallbackDoesNotAbortPolling) {
   auto result = node.Poll();
 
   EXPECT_TRUE(result.has_value()) << result.error().message();
+  EXPECT_FALSE(callback_called.load());
+  EXPECT_TRUE(node.Poll().has_value());
   EXPECT_TRUE(callback_called.load());
 }
 
@@ -593,6 +622,8 @@ TEST(SpwRmapTCPNodeImplTest, RegisteredTimecodeCallbackReceivesSixBits) {
 
   ASSERT_TRUE(received_timecode.has_value());
   EXPECT_EQ(*received_timecode, 0x15);
+  EXPECT_FALSE(reply_received.load());
+  ASSERT_TRUE(node.Poll().has_value());
   EXPECT_TRUE(reply_received.load());
 }
 
@@ -885,7 +916,7 @@ TEST(SpwRmapTCPNodeImplTest,
 TEST(SpwRmapTCPNodeImplTest, WriteTimeoutReleasesTransactionId) {
   TestNode node(MakeNodeConfig());
   auto target_node = spw_rmap::TargetNode(0x34)
-                         .SetTargetAddress(0x20, 0x30)
+                         .SetTargetAddress(0x02, 0x03)
                          .SetReplyAddress(0x10, 0x11);
   std::array<uint8_t, 2> payload{0x01, 0x02};
 

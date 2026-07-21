@@ -61,12 +61,34 @@ static inline auto SetListeningSockopt(int fd)
     LogErrno("Failed to set FD_CLOEXEC on listening socket", err);
     return std::unexpected{std::error_code(err, std::system_category())};
   }
+  const int flags = ::fcntl(fd, F_GETFL);
+  if (flags < 0) [[unlikely]] {
+    const int err = errno;
+    LogErrno("Failed to get listening socket flags", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
+  }
+  if (::fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) [[unlikely]] {
+    const int err = errno;
+    LogErrno("Failed to make listening socket non-blocking", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
+  }
   return {};
 }
 
 static inline auto ServerSetSockopts(int fd)
     -> std::expected<void, std::error_code> {
   int yes = 1;
+  const int flags = ::fcntl(fd, F_GETFL);
+  if (flags < 0) [[unlikely]] {
+    const int err = errno;
+    LogErrno("Failed to get server socket flags", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
+  }
+  if (::fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) < 0) [[unlikely]] {
+    const int err = errno;
+    LogErrno("Failed to make server socket blocking", err);
+    return std::unexpected{std::error_code(err, std::system_category())};
+  }
   // Disable Nagle for latency-sensitive traffic.
   if (::setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &yes, sizeof(yes)) != 0)
       [[unlikely]] {
@@ -165,11 +187,27 @@ static inline auto GaiCategory() noexcept -> const std::error_category& {
 }
 
 auto TCPServer::AcceptOnce() noexcept -> std::expected<void, std::error_code> {
-  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   return AcceptOnceUnlocked();
 }
 
-auto TCPServer::AcceptOnceUnlocked() noexcept -> std::expected<void, std::error_code> {
+auto TCPServer::AcceptOnceUnlocked() noexcept
+    -> std::expected<void, std::error_code> {
+  std::lock_guard<std::mutex> accept_lock(accept_mtx_);
+  struct AcceptProgressGuard {
+    std::atomic<bool>& flag;
+    ~AcceptProgressGuard() { flag.store(false); }
+  } accept_progress_guard{accept_in_progress_};
+  accept_abort_.store(false);
+  accept_in_progress_.store(true);
+  {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+    if (client_fd_ >= 0) {
+      CloseRetry(client_fd_);
+      client_fd_ = -1;
+      ResetTimeoutCache();
+    }
+  }
+
   addrinfo hints{};
   hints.ai_family = AF_UNSPEC;  // IPv4/IPv6 both
   hints.ai_socktype = SOCK_STREAM;
@@ -180,107 +218,163 @@ auto TCPServer::AcceptOnceUnlocked() noexcept -> std::expected<void, std::error_
   if (int rc = ::getaddrinfo(std::string(bind_address_).c_str(),
                              std::string(port_).c_str(), &hints, &res);
       rc != 0) [[unlikely]] {
-    spw_rmap::debug::Debug("getaddrinfo error: ", ::gai_strerror(rc));
-    return std::unexpected{std::error_code(rc, GaiCategory())};
+    if (rc == EAI_SYSTEM) [[unlikely]] {
+      const int err = errno;
+      LogErrno("getaddrinfo system error", err);
+      return std::unexpected{std::error_code(err, std::system_category())};
+    } else {
+      spw_rmap::debug::Debug("getaddrinfo error: ", ::gai_strerror(rc));
+      return std::unexpected{std::error_code(rc, GaiCategory())};
+    }
   }
   std::expected<void, std::error_code> last =
       std::unexpected(std::make_error_code(std::errc::invalid_argument));
 
   for (addrinfo* ai = res; ai != nullptr; ai = ai->ai_next) {
-    listen_fd_ = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
-    if (listen_fd_ < 0) [[unlikely]] {
+    int listen_fd = ::socket(ai->ai_family, ai->ai_socktype, ai->ai_protocol);
+    if (listen_fd < 0) [[unlikely]] {
       const int err = errno;
       LogErrno("Failed to create listening socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
       continue;
     }
 
-    last = internal::SetListeningSockopt(listen_fd_);
+    last = internal::SetListeningSockopt(listen_fd);
     if (!last.has_value()) [[unlikely]] {
-      CloseRetry(listen_fd_);
-      listen_fd_ = -1;
+      CloseRetry(listen_fd);
       continue;
     }
-    if (::bind(listen_fd_, ai->ai_addr, ai->ai_addrlen) != 0) [[unlikely]] {
+    if (::bind(listen_fd, ai->ai_addr, ai->ai_addrlen) != 0) [[unlikely]] {
       const int err = errno;
       LogErrno("Failed to bind listening socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
-      CloseRetry(listen_fd_);
-      listen_fd_ = -1;
+      CloseRetry(listen_fd);
       continue;
     }
-    if (::listen(listen_fd_, SOMAXCONN) != 0) [[unlikely]] {
+    if (::listen(listen_fd, SOMAXCONN) != 0) [[unlikely]] {
       const int err = errno;
       LogErrno("Failed to listen on socket", err);
       last = std::unexpected{std::error_code(err, std::system_category())};
-      CloseRetry(listen_fd_);
-      listen_fd_ = -1;
+      CloseRetry(listen_fd);
       continue;
     }
 
-    for (;;) {
-      client_fd_ = ::accept(listen_fd_, nullptr, nullptr);
-      if (client_fd_ < 0 && errno == EINTR) [[unlikely]] {
+    {
+      std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+      listen_fd_ = listen_fd;
+    }
+    int client_fd = -1;
+    // The blocking wait intentionally holds no lifecycle lock so Shutdown()
+    // can request an abort while accept is pending.
+    while (!accept_abort_.load()) {
+      pollfd pfd{.fd = listen_fd, .events = POLLIN, .revents = 0};
+      const int poll_rc = ::poll(&pfd, 1, 100);
+      if (poll_rc < 0 && errno == EINTR) [[unlikely]] {
+        continue;
+      }
+      if (poll_rc < 0) [[unlikely]] {
+        const int err = errno;
+        LogErrno("Failed to poll listening socket", err);
+        last = std::unexpected{std::error_code(err, std::system_category())};
+        break;
+      }
+      if (poll_rc == 0) {
+        continue;
+      }
+      if ((pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) [[unlikely]] {
+        last = std::unexpected{
+            std::make_error_code(std::errc::connection_aborted)};
+        break;
+      }
+      if ((pfd.revents & POLLIN) == 0) [[unlikely]] {
+        continue;
+      }
+      client_fd = ::accept(listen_fd, nullptr, nullptr);
+      if (client_fd < 0 && errno == EINTR) [[unlikely]] {
+        continue;
+      }
+      if (client_fd < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
         continue;
       }
       break;
     }
-    if (client_fd_ < 0) [[unlikely]] {
-      const int err = errno;
-      LogErrno("Failed to accept client socket", err);
-      last = std::unexpected{std::error_code(err, std::system_category())};
-      CloseRetry(listen_fd_);
-      listen_fd_ = -1;
+    {
+      std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+      if (listen_fd_ == listen_fd) {
+        listen_fd_ = -1;
+      }
+    }
+    CloseRetry(listen_fd);
+    if (accept_abort_.load()) [[unlikely]] {
+      CloseRetry(client_fd);
+      last =
+          std::unexpected{std::make_error_code(std::errc::operation_canceled)};
+      break;
+    }
+    if (client_fd < 0) [[unlikely]] {
+      if (last.has_value()) {
+        const int err = errno;
+        LogErrno("Failed to accept client socket", err);
+        last = std::unexpected{std::error_code(err, std::system_category())};
+      }
       continue;
     }
-    ResetTimeoutCache();
 
-    last =
-        internal::ServerSetSockopts(client_fd_)
-            .or_else(
-                [this](const auto& ec) -> std::expected<void, std::error_code> {
-                  CloseRetry(listen_fd_);
-                  listen_fd_ = -1;
-                  CloseRetry(client_fd_);
-                  client_fd_ = -1;
-                  ResetTimeoutCache();
-                  spw_rmap::debug::Debug([ec]() {
-                    std::ostringstream oss;
-                    oss << "Failed to set socket options on accepted socket: "
-                        << ec.message() << " (errno=" << ec.value() << ")";
-                    return oss.str();
-                  }());
-                  return std::unexpected{ec};
-                });
+    last = internal::ServerSetSockopts(client_fd).or_else(
+        [client_fd](const auto& ec) -> std::expected<void, std::error_code> {
+          CloseRetry(client_fd);
+          spw_rmap::debug::Debug([ec]() {
+            std::ostringstream oss;
+            oss << "Failed to set socket options on accepted socket: "
+                << ec.message() << " (errno=" << ec.value() << ")";
+            return oss.str();
+          }());
+          return std::unexpected{ec};
+        });
     if (last.has_value()) [[likely]] {
+      std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+      if (accept_abort_.load()) [[unlikely]] {
+        CloseRetry(client_fd);
+        last = std::unexpected{
+            std::make_error_code(std::errc::operation_canceled)};
+        break;
+      }
+      client_fd_ = client_fd;
+      shutdown_requested_ = false;
+      ResetTimeoutCache();
       break;
     }
   }
   ::freeaddrinfo(res);
-  if (client_fd_ < 0) [[unlikely]] {
-    client_fd_ = -1;
-    ResetTimeoutCache();
+  {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+    if (listen_fd_ >= 0) {
+      CloseRetry(listen_fd_);
+      listen_fd_ = -1;
+    }
+    if (client_fd_ < 0) [[unlikely]] {
+      ResetTimeoutCache();
+      return last;
+    }
+  }
+  if (!last.has_value()) [[unlikely]] {
     return last;
   }
-  shutdown_requested_ = false;
-  CloseRetry(listen_fd_);
-  listen_fd_ = -1;
   return {};
 }
 
 auto TCPServer::EnsureConnect() noexcept
     -> std::expected<void, std::error_code> {
   std::lock_guard<std::mutex> send_lock(send_mtx_);
-  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
-  if (client_fd_ >= 0 && SocketAlive(client_fd_)) [[likely]] {
-    return {};
-  }
-  if (client_fd_ >= 0) [[unlikely]] {
-    spw_rmap::debug::Debug("Client socket unhealthy, reopening server socket");
-    CloseRetry(client_fd_);
-    client_fd_ = -1;
-    ResetTimeoutCache();
-    shutdown_requested_ = false;
+  {
+    std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
+    if (client_fd_ >= 0 && SocketAlive(client_fd_)) [[likely]] {
+      return {};
+    }
+    if (client_fd_ >= 0) [[unlikely]] {
+      spw_rmap::debug::Debug(
+          "Client socket unhealthy, reopening server socket");
+    }
   }
   return AcceptOnceUnlocked();
 }
@@ -449,7 +543,6 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Receive would block, timing out");
-        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Receive failed", err);
@@ -465,8 +558,12 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
 }
 
 auto TCPServer::Shutdown() noexcept -> std::expected<void, std::error_code> {
+  accept_abort_.store(true);
   std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   if (client_fd_ < 0) [[unlikely]] {
+    if (listen_fd_ >= 0 || accept_in_progress_.load()) {
+      return {};
+    }
     spw_rmap::debug::Debug("Client socket not connected");
     return std::unexpected(
         std::make_error_code(std::errc::bad_file_descriptor));

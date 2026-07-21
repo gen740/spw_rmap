@@ -12,7 +12,7 @@
 namespace {
 
 TEST(TransactionDatabaseTest, IssuesSequentialIdsAndReleases) {
-  spw_rmap::TransactionDatabase db(0x10, 0x15);
+  spw_rmap::TransactionDatabase db(0x10, 0x14);
   std::vector<uint16_t> ids;
   for (int i = 0; i < 5; ++i) {
     auto id = db.Acquire();
@@ -67,7 +67,7 @@ TEST(TransactionDatabaseTest, TimeoutInvokesCallbackWithError) {
 
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
   std::vector<uint16_t> later_ids;
-  const auto capacity = static_cast<int>(0x42 - 0x40);
+  const auto capacity = static_cast<int>(0x42 - 0x40 + 1);
   for (int i = 0; i < capacity; ++i) {
     auto next = db.Acquire();
     ASSERT_TRUE(next.has_value());
@@ -83,6 +83,7 @@ TEST(TransactionDatabaseTest, ExhaustionReturnsResourceUnavailable) {
   ASSERT_TRUE(db.Acquire().has_value());
   ASSERT_TRUE(db.Acquire().has_value());
   ASSERT_TRUE(db.Acquire().has_value());
+  ASSERT_TRUE(db.Acquire().has_value());
   auto exhausted = db.Acquire();
 
   ASSERT_FALSE(exhausted.has_value());
@@ -94,8 +95,9 @@ TEST(TransactionDatabaseTest, InvalidReleaseDoesNotCorruptCapacity) {
   spw_rmap::TransactionDatabase db(0x10, 0x12);
 
   db.Release(0x0F);
-  db.Release(0x12);
+  db.Release(0x13);
 
+  EXPECT_TRUE(db.Acquire().has_value());
   EXPECT_TRUE(db.Acquire().has_value());
   EXPECT_TRUE(db.Acquire().has_value());
   EXPECT_FALSE(db.Acquire().has_value());
@@ -116,7 +118,7 @@ TEST(TransactionDatabaseTest, ReplyCallbackCanOnlyBeInvokedOnce) {
 
 TEST(TransactionDatabaseTest, ConcurrentAcquireReturnsUniqueIds) {
   constexpr int kThreadCount = 32;
-  spw_rmap::TransactionDatabase db(0, kThreadCount);
+  spw_rmap::TransactionDatabase db(0, kThreadCount - 1);
   std::mutex results_mutex;
   std::vector<uint16_t> ids;
   std::vector<std::error_code> errors;
@@ -148,8 +150,7 @@ TEST(TransactionDatabaseTest, ConcurrentAcquireReturnsUniqueIds) {
 }
 
 TEST(TransactionDatabaseTest, InvalidRangesCreateSafeEmptyDatabase) {
-  for (const auto [minimum, maximum] :
-       {std::pair<uint16_t, uint16_t>{5, 5}, {6, 5}}) {
+  for (const auto [minimum, maximum] : {std::pair<uint16_t, uint16_t>{6, 5}}) {
     spw_rmap::TransactionDatabase db(minimum, maximum);
 
     auto result = db.Acquire();
@@ -160,8 +161,31 @@ TEST(TransactionDatabaseTest, InvalidRangesCreateSafeEmptyDatabase) {
   }
 }
 
+TEST(TransactionDatabaseTest, EqualBoundsCreateSingletonDatabase) {
+  spw_rmap::TransactionDatabase db(5, 5);
+
+  auto result = db.Acquire();
+
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(*result, 5);
+  EXPECT_FALSE(db.Acquire().has_value());
+}
+
+TEST(TransactionDatabaseTest, FullRangeIncludesMaximumTransactionId) {
+  spw_rmap::TransactionDatabase db(0x0000, 0xFFFF);
+  std::expected<uint16_t, std::error_code> result =
+      std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  for (std::size_t i = 0; i <= 0xFFFF; ++i) {
+    result = db.Acquire();
+    ASSERT_TRUE(result.has_value());
+  }
+
+  EXPECT_EQ(*result, 0xFFFF);
+  EXPECT_FALSE(db.Acquire().has_value());
+}
+
 TEST(TransactionDatabaseTest, ZeroTimeoutDisablesReclamation) {
-  spw_rmap::TransactionDatabase db(0x10, 0x11);
+  spw_rmap::TransactionDatabase db(0x10, 0x10);
   db.SetTimeout(std::chrono::milliseconds::zero());
   std::atomic<bool> callback_called{false};
   ASSERT_TRUE(db.Acquire([&callback_called](auto) -> void {
@@ -177,7 +201,7 @@ TEST(TransactionDatabaseTest, ZeroTimeoutDisablesReclamation) {
 
 TEST(TransactionDatabaseTest, ConcurrentReplyAndReleaseAreSafe) {
   for (int iteration = 0; iteration < 100; ++iteration) {
-    spw_rmap::TransactionDatabase db(0, 1);
+    spw_rmap::TransactionDatabase db(0, 0);
     std::atomic<int> callback_count{0};
     auto id = db.Acquire([&callback_count](auto) -> void { ++callback_count; });
     ASSERT_TRUE(id.has_value());

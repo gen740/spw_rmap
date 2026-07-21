@@ -100,8 +100,9 @@ class SpwRmapTCPServer
       : internal::SpwRmapTCPNodeImpl<internal::TCPServer>(std::move(config)) {}
 
   auto AcceptOnce() -> std::expected<void, std::error_code> {
-    std::lock_guard<std::mutex> lock(shutdown_mtx_);
+    // Accept waits without shutdown_mtx_ so Stop()/Shutdown() can abort it.
     auto res = GetBackend()->AcceptOnce();
+    std::lock_guard<std::mutex> lock(shutdown_mtx_);
     if (!res.has_value()) [[unlikely]] {
       std::cerr << "Failed to accept TCP connection: " << res.error().message()
                 << "\n";

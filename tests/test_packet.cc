@@ -429,6 +429,83 @@ TEST(spw_rmap, CommandBuildersRejectUnencodableFields) {
             std::make_error_code(std::errc::invalid_argument));
 }
 
+TEST(spw_rmap, BuildersRejectInvalidPathAndLogicalAddresses) {
+  using namespace spw_rmap;
+
+  const std::array<uint8_t, 1> invalid_path{0x20};
+  auto read = ReadPacketConfig{};
+  read.target_spw_address = invalid_path;
+  read.target_logical_address = 0x34;
+  std::vector<uint8_t> read_output(read.ExpectedSize());
+  auto read_result = BuildReadPacket(read, read_output);
+  ASSERT_FALSE(read_result.has_value());
+  EXPECT_EQ(read_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+
+  auto write = WritePacketConfig{};
+  write.target_logical_address = 0x1F;
+  std::vector<uint8_t> write_output(write.ExpectedSize());
+  auto write_result = BuildWritePacket(write, write_output);
+  ASSERT_FALSE(write_result.has_value());
+  EXPECT_EQ(write_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+
+  auto read_reply = ReadReplyPacketConfig{};
+  read_reply.reply_spw_address = invalid_path;
+  std::vector<uint8_t> read_reply_output(read_reply.ExpectedSize());
+  auto read_reply_result = BuildReadReplyPacket(read_reply, read_reply_output);
+  ASSERT_FALSE(read_reply_result.has_value());
+  EXPECT_EQ(read_reply_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+
+  auto write_reply = WriteReplyPacketConfig{};
+  write_reply.reply_spw_address = invalid_path;
+  std::vector<uint8_t> write_reply_output(write_reply.ExpectedSize());
+  auto write_reply_result =
+      BuildWriteReplyPacket(write_reply, write_reply_output);
+  ASSERT_FALSE(write_reply_result.has_value());
+  EXPECT_EQ(write_reply_result.error(),
+            std::make_error_code(std::errc::invalid_argument));
+}
+
+TEST(spw_rmap, TargetNodeAcceptsMaximumAddressLength) {
+  using namespace spw_rmap;
+
+  const std::array<uint8_t, TargetNode::kMaxAddressLen> full{};
+  TargetNode node(0x34);
+  node.SetTargetAddress(std::span<const uint8_t>(full));
+  node.SetReplyAddress(std::span<const uint8_t>(full));
+
+  EXPECT_EQ(node.GetTargetAddress().size(), TargetNode::kMaxAddressLen);
+  EXPECT_EQ(node.GetReplyAddress().size(), TargetNode::kMaxAddressLen);
+}
+
+TEST(spw_rmap, TargetNodeDefaultLogicalAddressIsAValidLogicalAddress) {
+  // `TargetNode{}` must be unambiguous and carry a logical address the packet
+  // builders accept (>= 0x20).
+  EXPECT_GE(spw_rmap::TargetNode{}.GetTargetLogicalAddress(), 0x20);
+}
+
+TEST(TargetNodeDeathTest, OversizedAddressTerminates) {
+  using namespace spw_rmap;
+
+  const std::array<uint8_t, TargetNode::kMaxAddressLen + 1> too_long{};
+  EXPECT_DEATH(
+      {
+        TargetNode(0x34).SetTargetAddress(std::span<const uint8_t>(too_long));
+      },
+      "exceeds maximum");
+  EXPECT_DEATH(
+      { TargetNode(0x34).SetReplyAddress(std::span<const uint8_t>(too_long)); },
+      "exceeds maximum");
+  EXPECT_DEATH(
+      {
+        TargetNode(0x34).SetTargetAddress(
+            {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12});
+      },
+      "exceeds maximum");
+}
+
 TEST(spw_rmap, ReadReplyBuilderRejectsUnencodableDataLength) {
   using namespace spw_rmap;
 
@@ -571,6 +648,23 @@ TEST(spw_rmap, ReadReplyRejectsDeclaredLengthMismatch) {
   ASSERT_TRUE(BuildReadReplyPacket(config, packet).has_value());
   packet[10] = 5;
   packet[11] = crc::CalcCrc(std::span(packet).first(11));
+
+  auto result = ParseRMAPPacket(packet);
+
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(),
+            make_error_code(RMAPParseStatus::kIncompletePacket));
+}
+
+TEST(spw_rmap, ErrorReadReplyRejectsTrailingData) {
+  using namespace spw_rmap;
+
+  auto config = ReadReplyPacketConfig{};
+  config.initiator_logical_address = 0xFE;
+  config.target_logical_address = 0x34;
+  config.status = PacketStatusCode::kInvalidKey;
+  std::vector<uint8_t> packet(config.ExpectedSize() + 1);
+  ASSERT_TRUE(BuildReadReplyPacket(config, packet).has_value());
 
   auto result = ParseRMAPPacket(packet);
 

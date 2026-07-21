@@ -336,6 +336,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
           if (on_timecode_callback_) [[likely]] {
             on_timecode_callback_(tc[0] & 0x3F);
           }
+          return Packet{};
         } break;
         default:
           spw_rmap::debug::Debug("Received packet with unknown type byte: ",
@@ -374,18 +375,19 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
   auto SetHeader(size_t total_size) noexcept -> void {
+    const auto total_size_u64 = static_cast<uint64_t>(total_size);
     send_buf_[0] = 0x00;
     send_buf_[1] = 0x00;
     send_buf_[2] = 0x00;
     send_buf_[3] = 0x00;
-    send_buf_[4] = static_cast<uint8_t>((total_size >> 56) & 0xFF);
-    send_buf_[5] = static_cast<uint8_t>((total_size >> 48) & 0xFF);
-    send_buf_[6] = static_cast<uint8_t>((total_size >> 40) & 0xFF);
-    send_buf_[7] = static_cast<uint8_t>((total_size >> 32) & 0xFF);
-    send_buf_[8] = static_cast<uint8_t>((total_size >> 24) & 0xFF);
-    send_buf_[9] = static_cast<uint8_t>((total_size >> 16) & 0xFF);
-    send_buf_[10] = static_cast<uint8_t>((total_size >> 8) & 0xFF);
-    send_buf_[11] = static_cast<uint8_t>((total_size >> 0) & 0xFF);
+    send_buf_[4] = static_cast<uint8_t>((total_size_u64 >> 56) & 0xFF);
+    send_buf_[5] = static_cast<uint8_t>((total_size_u64 >> 48) & 0xFF);
+    send_buf_[6] = static_cast<uint8_t>((total_size_u64 >> 40) & 0xFF);
+    send_buf_[7] = static_cast<uint8_t>((total_size_u64 >> 32) & 0xFF);
+    send_buf_[8] = static_cast<uint8_t>((total_size_u64 >> 24) & 0xFF);
+    send_buf_[9] = static_cast<uint8_t>((total_size_u64 >> 16) & 0xFF);
+    send_buf_[10] = static_cast<uint8_t>((total_size_u64 >> 8) & 0xFF);
+    send_buf_[11] = static_cast<uint8_t>((total_size_u64 >> 0) & 0xFF);
   }
 
   auto SendReadPacket(const TargetNode& target_node, uint16_t transaction_id,
@@ -797,6 +799,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   std::function<void(std::expected<Packet, std::error_code>)>
                       on_complete) noexcept
       -> std::expected<uint16_t, std::error_code> override {
+    if (!on_complete) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+    }
     if (!tcp_backend_) [[unlikely]] {
       return std::unexpected{std::make_error_code(std::errc::not_connected)};
     }
@@ -837,6 +842,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             std::chrono::milliseconds timeout =
                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
+    if (data.size() > 0x00FF'FFFFU) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+    }
     if (!tcp_backend_) [[unlikely]] {
       return std::unexpected{std::make_error_code(std::errc::not_connected)};
     }
@@ -972,6 +980,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                  std::function<void(std::expected<Packet, std::error_code>)>
                      on_complete) noexcept
       -> std::expected<uint16_t, std::error_code> override {
+    if (!on_complete) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+    }
     if (!tcp_backend_) [[unlikely]] {
       return std::unexpected{std::make_error_code(std::errc::not_connected)};
     }
