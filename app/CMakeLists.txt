@@ -17,11 +17,19 @@ target_compile_features(spwrmap_speedtest_cli PRIVATE cxx_std_23)
 set_target_properties(spwrmap_speedtest_cli PROPERTIES
                       OUTPUT_NAME spwrmap_speedtest)
 
-install(TARGETS spwrmap_cli spwrmap_speedtest_cli RUNTIME DESTINATION bin)
+add_executable(spwrmap_timecode_cli timecode.cc)
+target_link_libraries(spwrmap_timecode_cli PRIVATE spw_rmap)
+target_compile_features(spwrmap_timecode_cli PRIVATE cxx_std_23)
+set_target_properties(spwrmap_timecode_cli PROPERTIES
+                      OUTPUT_NAME spwrmap_timecode)
+
+install(TARGETS spwrmap_cli spwrmap_speedtest_cli spwrmap_timecode_cli
+        RUNTIME DESTINATION bin)
 
 if(SPWRMAP_BUILD_PYTHON_BINDINGS)
   # Copy the CLI binaries into the Python package so entry points can invoke them.
   install(
     PROGRAMS $<TARGET_FILE:spwrmap_cli> $<TARGET_FILE:spwrmap_speedtest_cli>
+             $<TARGET_FILE:spwrmap_timecode_cli>
     DESTINATION pyspw_rmap/bin)
 endif()

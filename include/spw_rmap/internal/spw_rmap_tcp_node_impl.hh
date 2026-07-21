@@ -266,7 +266,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         return std::unexpected{std::make_error_code(std::errc::message_size)};
       }
       if (*data_length > recv_buffer.size()) [[unlikely]] {
-        if (buffer_policy_ == BufferPolicy::kFixed) {
+        if (buffer_policy_ == BufferPolicy::kFixed) [[unlikely]] {
           spw_rmap::debug::Debug(
               "Receive buffer too small for incoming packet data");
           return std::unexpected{
@@ -295,9 +295,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   "Failed to ignore packet data of type 0x01");
               return std::unexpected(res.error());
             }
-            return RecvAndParseOnePacket();
+            total_size = 0;
+            recv_buffer = std::span(recv_buf_);
+            continue;
           }
-          break;
         case 0x02:
           [[unlikely]] {
             auto res = RecvExact(recv_buffer.first(*data_length));
@@ -403,7 +404,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     };
     auto send_buffer = std::span(send_buf_);
     if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
-      if (buffer_policy_ == BufferPolicy::kFixed) {
+      if (buffer_policy_ == BufferPolicy::kFixed) [[unlikely]] {
         spw_rmap::debug::Debug("Send buffer too small for Read Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
@@ -442,7 +443,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     };
     auto send_buffer = std::span(send_buf_);
     if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
-      if (buffer_policy_ == BufferPolicy::kFixed) {
+      if (buffer_policy_ == BufferPolicy::kFixed) [[unlikely]] {
         spw_rmap::debug::Debug("Send buffer too small for Write Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
@@ -504,7 +505,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto send_buffer = std::span(send_buf_);
     if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
-      if (buffer_policy_ == BufferPolicy::kFixed) {
+      if (buffer_policy_ == BufferPolicy::kFixed) [[unlikely]] {
         spw_rmap::debug::Debug("Send buffer too small for Read Reply Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
@@ -544,7 +545,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
     std::lock_guard<std::mutex> lock(send_mtx_);
     auto send_buffer = std::span(send_buf_);
     if (config.ExpectedSize() + 12 > send_buffer.size()) [[unlikely]] {
-      if (buffer_policy_ == BufferPolicy::kFixed) {
+      if (buffer_policy_ == BufferPolicy::kFixed) [[unlikely]] {
         spw_rmap::debug::Debug("Send buffer too small for Write Reply Packet");
         return std::unexpected{
             std::make_error_code(std::errc::no_buffer_space)};
@@ -570,6 +571,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   virtual auto IsShutdowned() noexcept -> bool = 0;
 
   auto Poll() noexcept -> std::expected<void, std::error_code> override {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
     return RecvAndParseOnePacket()
         .and_then([this](
                       Packet packet) -> std::expected<void, std::error_code> {
@@ -623,6 +627,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
   }
 
   auto RunLoop() noexcept -> std::expected<void, std::error_code> override {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
     running_.store(true);
     while (running_.load()) {
       auto res = Poll();
@@ -689,6 +696,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
              std::chrono::milliseconds timeout =
                  std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
     if (auto_polling_mode_) {
       std::unique_lock<std::mutex> autopoll_lock(auto_polling_serial_mtx_);
       int32_t transaction_id_memo = -1;
@@ -787,6 +797,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                   std::function<void(std::expected<Packet, std::error_code>)>
                       on_complete) noexcept
       -> std::expected<uint16_t, std::error_code> override {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
     if (auto_polling_mode_) [[unlikely]] {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
@@ -824,6 +837,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
             std::chrono::milliseconds timeout =
                 std::chrono::milliseconds{100}) noexcept
       -> std::expected<void, std::error_code> override {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
     if (auto_polling_mode_) {
       std::unique_lock<std::mutex> autopoll_lock(auto_polling_serial_mtx_);
       int32_t transaction_id_memo = -1;
@@ -956,7 +972,10 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
                  std::function<void(std::expected<Packet, std::error_code>)>
                      on_complete) noexcept
       -> std::expected<uint16_t, std::error_code> override {
-    if (auto_polling_mode_) {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
+    if (auto_polling_mode_) [[unlikely]] {
       return std::unexpected{
           std::make_error_code(std::errc::operation_not_permitted)};
     }
@@ -984,6 +1003,9 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
 
   auto EmitTimeCode(uint8_t timecode) noexcept
       -> std::expected<void, std::error_code> override {
+    if (!tcp_backend_) [[unlikely]] {
+      return std::unexpected{std::make_error_code(std::errc::not_connected)};
+    }
     std::lock_guard<std::mutex> lock(send_mtx_);
     std::array<uint8_t, 14> packet{};
     packet[0] = 0x30;

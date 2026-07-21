@@ -55,7 +55,7 @@ auto ParseUnsigned(std::string_view token, unsigned long long max_value)
     std::string value_str(token);
     size_t idx = 0;
     auto value = std::stoull(value_str, &idx, 0);
-    if (idx != value_str.size() || value > max_value) {
+    if (idx != value_str.size() || value > max_value) [[unlikely]] {
       return std::nullopt;
     }
     return value;
@@ -75,7 +75,7 @@ auto ParseByteSequence(int argc, char** argv, int& index,
     }
     ++index;
     auto value = ParseUnsigned(next, 0xFF);
-    if (!value.has_value()) {
+    if (!value.has_value()) [[unlikely]] {
       std::cerr << "Invalid value for --" << option_name << ": '" << next
                 << "'\n";
       return false;
@@ -83,7 +83,7 @@ auto ParseByteSequence(int argc, char** argv, int& index,
     destination.push_back(static_cast<uint8_t>(*value));
     parsed = true;
   }
-  if (!parsed) {
+  if (!parsed) [[unlikely]] {
     std::cerr << "--" << option_name << " requires at least one byte value.\n";
   }
   return parsed;
@@ -94,7 +94,7 @@ auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
-    if (!arg.starts_with("--")) {
+    if (!arg.starts_with("--")) [[unlikely]] {
       std::cerr << "Unknown argument: " << arg << "\n";
       return std::nullopt;
     }
@@ -102,7 +102,7 @@ auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
 
     auto take_value =
         [&](std::string_view option) -> std::optional<std::string> {
-      if (i + 1 >= argc) {
+      if (i + 1 >= argc) [[unlikely]] {
         std::cerr << "--" << option << " requires a value.\n";
         return std::nullopt;
       }
@@ -111,19 +111,19 @@ auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
 
     if (name == "ip") {
       auto value = take_value(name);
-      if (!value) {
+      if (!value) [[unlikely]] {
         return std::nullopt;
       }
       opts.ip = std::move(*value);
     } else if (name == "port") {
       auto value = take_value(name);
-      if (!value) {
+      if (!value) [[unlikely]] {
         return std::nullopt;
       }
       opts.port = std::move(*value);
     } else if (name == "type") {
       auto value = take_value(name);
-      if (!value) {
+      if (!value) [[unlikely]] {
         return std::nullopt;
       }
       opts.type = std::move(*value);
@@ -132,67 +132,69 @@ auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
                                return static_cast<char>(std::tolower(ch));
                              });
     } else if (name == "target-address") {
-      if (!ParseByteSequence(argc, argv, i, name, opts.target_address)) {
+      if (!ParseByteSequence(argc, argv, i, name, opts.target_address))
+          [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "reply-address") {
-      if (!ParseByteSequence(argc, argv, i, name, opts.reply_address)) {
+      if (!ParseByteSequence(argc, argv, i, name, opts.reply_address))
+          [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "address") {
       auto value = take_value(name);
-      if (!value) {
+      if (!value) [[unlikely]] {
         return std::nullopt;
       }
       auto parsed = ParseUnsigned(*value, std::numeric_limits<uint32_t>::max());
-      if (!parsed.has_value()) {
+      if (!parsed.has_value()) [[unlikely]] {
         std::cerr << "Invalid --address: '" << *value << "'\n";
         return std::nullopt;
       }
       opts.address = static_cast<uint32_t>(*parsed);
     } else if (name == "length") {
       auto value = take_value(name);
-      if (!value) {
+      if (!value) [[unlikely]] {
         return std::nullopt;
       }
       auto parsed =
           ParseUnsigned(*value, std::numeric_limits<std::size_t>::max());
-      if (!parsed.has_value() || *parsed == 0) {
+      if (!parsed.has_value() || *parsed == 0) [[unlikely]] {
         std::cerr << "Invalid --length: '" << *value << "'\n";
         return std::nullopt;
       }
       opts.length = static_cast<std::size_t>(*parsed);
     } else if (name == "data") {
-      if (!ParseByteSequence(argc, argv, i, name, opts.data)) {
+      if (!ParseByteSequence(argc, argv, i, name, opts.data)) [[unlikely]] {
         return std::nullopt;
       }
-    } else {
+    } else [[unlikely]] {
       std::cerr << "Unknown option: --" << name << "\n";
       return std::nullopt;
     }
   }
 
-  if (opts.type != "read" && opts.type != "write") {
+  if (opts.type != "read" && opts.type != "write") [[unlikely]] {
     std::cerr << "--type must be 'read' or 'write'.\n";
     return std::nullopt;
   }
-  if (opts.target_address.empty()) {
+  if (opts.target_address.empty()) [[unlikely]] {
     std::cerr << "--target-address is required.\n";
     return std::nullopt;
   }
-  if (opts.reply_address.empty()) {
+  if (opts.reply_address.empty()) [[unlikely]] {
     std::cerr << "--reply-address is required.\n";
     return std::nullopt;
   }
-  if (!opts.address.has_value()) {
+  if (!opts.address.has_value()) [[unlikely]] {
     std::cerr << "--address is required.\n";
     return std::nullopt;
   }
-  if (opts.type == "read" && !opts.length.has_value()) {
+  if (opts.type == "read" && !opts.length.has_value()) [[unlikely]] {
     std::cerr << "--length is required for read operations.\n";
     return std::nullopt;
   }
-  if (opts.type == "write" && opts.data.empty()) {
+  if (opts.type == "write" && opts.data.empty()) [[unlikely]] {
     std::cerr << "--data is required for write operations.\n";
     return std::nullopt;
   }
@@ -204,7 +206,7 @@ auto PerformRead(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
                  const spw_rmap::TargetNode& target) -> bool {
   std::vector<uint8_t> buffer(*opts.length);
   auto res = client.Read(target, *opts.address, buffer);
-  if (!res.has_value()) {
+  if (!res.has_value()) [[unlikely]] {
     std::cerr << "Read failed: " << res.error().message() << "\n";
     return false;
   }
@@ -220,7 +222,7 @@ auto PerformRead(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
 auto PerformWrite(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
                   const spw_rmap::TargetNode& target) -> bool {
   auto res = client.Write(target, *opts.address, opts.data);
-  if (!res.has_value()) {
+  if (!res.has_value()) [[unlikely]] {
     std::cerr << "Write failed: " << res.error().message() << "\n";
     return false;
   }
@@ -233,7 +235,7 @@ auto PerformWrite(const Options& opts, spw_rmap::SpwRmapTCPClient& client,
 }  // namespace
 
 auto main(int argc, char** argv) -> int {
-  if (argc == 1) {
+  if (argc == 1) [[unlikely]] {
     PrintUsage(argv[0]);
     return 1;
   }
@@ -245,7 +247,7 @@ auto main(int argc, char** argv) -> int {
   }
 
   auto options = ParseOptions(argc, argv);
-  if (!options) {
+  if (!options) [[unlikely]] {
     PrintUsage(argv[0]);
     return 1;
   }
@@ -258,7 +260,7 @@ auto main(int argc, char** argv) -> int {
   client.SetAutoPollingMode(true);
 
   auto connect_res = client.Connect(1s);
-  if (!connect_res.has_value()) {
+  if (!connect_res.has_value()) [[unlikely]] {
     std::cerr << "Failed to connect to " << opts.ip << ":" << opts.port << " - "
               << connect_res.error().message() << "\n";
     return 1;
@@ -272,7 +274,7 @@ auto main(int argc, char** argv) -> int {
                                      : PerformWrite(opts, client, target_node);
 
   auto shutdown_res = client.Shutdown();
-  if (!shutdown_res.has_value()) {
+  if (!shutdown_res.has_value()) [[unlikely]] {
     std::cerr << "Shutdown error: " << shutdown_res.error().message() << "\n";
     success = false;
   }

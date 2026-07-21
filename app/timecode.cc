@@ -54,7 +54,7 @@ auto parseFrequency(std::string_view token) -> std::optional<double> {
   try {
     std::string value(token);
     auto freq = std::stod(value);
-    if (freq <= 0.0 || !std::isfinite(freq)) {
+    if (freq <= 0.0 || !std::isfinite(freq)) [[unlikely]] {
       return std::nullopt;
     }
     return freq;
@@ -68,7 +68,7 @@ auto parseStartValue(std::string_view token) -> std::optional<uint8_t> {
     std::string value(token);
     size_t idx = 0;
     auto parsed = std::stoul(value, &idx, 0);
-    if (idx != value.size() || parsed > 0x3F) {
+    if (idx != value.size() || parsed > 0x3F) [[unlikely]] {
       return std::nullopt;
     }
     return static_cast<uint8_t>(parsed & 0x3F);
@@ -82,7 +82,7 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
-    if (!arg.starts_with("--")) {
+    if (!arg.starts_with("--")) [[unlikely]] {
       std::cerr << "Unknown argument: " << arg << "\n";
       return std::nullopt;
     }
@@ -90,7 +90,7 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
 
     auto takeValue =
         [&](std::string_view option) -> std::optional<std::string> {
-      if (i + 1 >= argc) {
+      if (i + 1 >= argc) [[unlikely]] {
         std::cerr << "--" << option << " requires a value.\n";
         return std::nullopt;
       }
@@ -100,49 +100,49 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
     if (name == "ip") {
       if (auto value = takeValue(name)) {
         opts.ip = std::move(*value);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "port") {
       if (auto value = takeValue(name)) {
         opts.port = std::move(*value);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "freq") {
       if (auto value = takeValue(name)) {
         auto freq = parseFrequency(*value);
-        if (!freq) {
+        if (!freq) [[unlikely]] {
           std::cerr << "Invalid --freq: '" << *value
                     << "' (must be positive)\n";
           return std::nullopt;
         }
         opts.frequency_hz = *freq;
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "start") {
       if (auto value = takeValue(name)) {
         auto parsed = parseStartValue(*value);
-        if (!parsed) {
+        if (!parsed) [[unlikely]] {
           std::cerr << "Invalid --start: '" << *value
                     << "' (must be in [0, 63])\n";
           return std::nullopt;
         }
         opts.start_value = *parsed;
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "help") {
       printUsage(argv[0]);
       std::exit(0);
-    } else {
+    } else [[unlikely]] {
       std::cerr << "Unknown option: --" << name << "\n";
       return std::nullopt;
     }
   }
 
-  if (opts.frequency_hz <= 0.0) {
+  if (opts.frequency_hz <= 0.0) [[unlikely]] {
     std::cerr << "--freq must be specified and greater than zero.\n";
     return std::nullopt;
   }
@@ -154,7 +154,7 @@ auto parseOptions(int argc, char** argv) -> std::optional<Options> {
 
 auto main(int argc, char** argv) -> int {
   auto options = parseOptions(argc, argv);
-  if (!options) {
+  if (!options) [[unlikely]] {
     printUsage(argv[0]);
     return 1;
   }
@@ -163,11 +163,11 @@ auto main(int argc, char** argv) -> int {
   installSignalHandlers();
 
   spw_rmap::SpwRmapTCPClient client({.ip_address = opts.ip, .port = opts.port});
-  client.setInitiatorLogicalAddress(0xFE);
-  client.setAutoPollingMode(true);
+  client.SetInitiatorLogicalAddress(0xFE);
+  client.SetAutoPollingMode(true);
 
-  auto connect_res = client.connect(1s);
-  if (!connect_res.has_value()) {
+  auto connect_res = client.Connect(1s);
+  if (!connect_res.has_value()) [[unlikely]] {
     std::cerr << "Failed to connect to " << opts.ip << ":" << opts.port << " - "
               << connect_res.error().message() << "\n";
     return 1;
@@ -185,8 +185,8 @@ auto main(int argc, char** argv) -> int {
   uint8_t value = opts.start_value & 0x3F;
   auto next_wakeup = Clock::now();
   while (g_should_run.load(std::memory_order_relaxed)) {
-    auto emit_res = client.emitTimeCode(value);
-    if (!emit_res.has_value()) {
+    auto emit_res = client.EmitTimeCode(value);
+    if (!emit_res.has_value()) [[unlikely]] {
       std::cerr << "\nFailed to emit time code " << static_cast<int>(value)
                 << ": " << emit_res.error().message() << "\n";
       break;
@@ -199,8 +199,8 @@ auto main(int argc, char** argv) -> int {
   }
   std::cout << "\nStopping timecode emission.\n";
 
-  auto shutdown_res = client.shutdown();
-  if (!shutdown_res.has_value()) {
+  auto shutdown_res = client.Shutdown();
+  if (!shutdown_res.has_value()) [[unlikely]] {
     std::cerr << "Shutdown error: " << shutdown_res.error().message() << "\n";
     return 1;
   }

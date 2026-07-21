@@ -25,9 +25,10 @@ class TCPClient {
  private:
   // Send and receive are independent directions of a full-duplex TCP socket.
   // Lifecycle/configuration calls must still be serialized by the application
-  // against active I/O, except that Shutdown() may interrupt a blocking receive.
-  // Automatic reconnection additionally takes send_mtx_ before lifecycle_mtx_
-  // so that the descriptor generation cannot change during SendAll().
+  // against active I/O, except that Shutdown() may interrupt a blocking
+  // receive. Automatic reconnection additionally takes send_mtx_ before
+  // lifecycle_mtx_ so that the descriptor generation cannot change during
+  // SendAll().
   std::mutex lifecycle_mtx_;
   std::mutex send_mtx_;
   std::mutex receive_mtx_;

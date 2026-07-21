@@ -12,7 +12,7 @@ auto main() -> int {
       {.ip_address = "192.168.1.100", .port = "10030"});
   client.SetInitiatorLogicalAddress(0xFE);
   client.SetAutoPollingMode(true);
-  if (auto res = client.Connect(1s); !res.has_value()) {
+  if (auto res = client.Connect(1s); !res.has_value()) [[unlikely]] {
     std::cerr << "Connect failed: " << res.error().message() << '\n';
     return 1;
   }
@@ -25,10 +25,11 @@ auto main() -> int {
   const uint32_t kDemoAddress = 0x44A20000;
   const std::array<uint8_t, 4> kPayload{0x01, 0x02, 0x03, 0x04};
 
-  if (auto res = client.Write(target, kDemoAddress, kPayload);
-      !res.has_value()) {
+  if (auto res = client.Write(target, kDemoAddress, kPayload); !res.has_value())
+      [[unlikely]] {
     std::cerr << "Sync write failed: " << res.error().message() << '\n';
-    if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
+    if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value())
+        [[unlikely]] {
       std::cerr << "Shutdown error: " << shutdown_res.error().message() << '\n';
     }
     return 1;
@@ -41,15 +42,16 @@ auto main() -> int {
       std::cout << " 0x" << std::hex << +byte;
     }
     std::cout << std::dec << '\n';
-  } else {
+  } else [[unlikely]] {
     std::cerr << "Sync read failed: " << res.error().message() << '\n';
-    if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
+    if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value())
+        [[unlikely]] {
       std::cerr << "Shutdown error: " << shutdown_res.error().message() << '\n';
     }
     return 1;
   }
 
-  if (auto res = client.Shutdown(); !res.has_value()) {
+  if (auto res = client.Shutdown(); !res.has_value()) [[unlikely]] {
     std::cerr << "Shutdown error: " << res.error().message() << '\n';
     return 1;
   }

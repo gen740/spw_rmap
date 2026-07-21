@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.20)
 project(spw_rmap LANGUAGES CXX)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)

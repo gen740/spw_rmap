@@ -560,13 +560,12 @@ TEST(TcpClientServer, BlockingReceiveDoesNotBlockSend) {
   ASSERT_EQ(accepted.wait_for(1s), std::future_status::ready);
 
   std::array<uint8_t, 1> received{};
-  auto receive_future = std::async(std::launch::async, [&]() {
-    return client.RecvSome(received);
-  });
+  auto receive_future = std::async(std::launch::async,
+                                   [&]() { return client.RecvSome(received); });
   std::this_thread::sleep_for(50ms);
   const std::array<uint8_t, 1> request{0x42};
-  auto send_future = std::async(std::launch::async,
-                                [&]() { return client.SendAll(request); });
+  auto send_future =
+      std::async(std::launch::async, [&]() { return client.SendAll(request); });
 
   const auto send_status = send_future.wait_for(250ms);
   EXPECT_EQ(send_status, std::future_status::ready)
@@ -623,17 +622,15 @@ TEST(TcpClientServer, ShutdownInterruptsBlockingReceive) {
   ASSERT_TRUE(client.Connect(500ms).has_value());
   ASSERT_EQ(accepted.wait_for(1s), std::future_status::ready);
   std::array<uint8_t, 1> received{};
-  auto receive_future = std::async(std::launch::async, [&]() {
-    return client.RecvSome(received);
-  });
+  auto receive_future = std::async(std::launch::async,
+                                   [&]() { return client.RecvSome(received); });
   std::this_thread::sleep_for(50ms);
 
   const auto started = std::chrono::steady_clock::now();
   auto shutdown_result = client.Shutdown();
   const auto elapsed = std::chrono::steady_clock::now() - started;
 
-  ASSERT_TRUE(shutdown_result.has_value())
-      << shutdown_result.error().message();
+  ASSERT_TRUE(shutdown_result.has_value()) << shutdown_result.error().message();
   EXPECT_LT(elapsed, 250ms) << "shutdown waited for the peer to close";
   ASSERT_EQ(receive_future.wait_for(250ms), std::future_status::ready);
   EXPECT_FALSE(receive_future.get().has_value());

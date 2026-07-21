@@ -43,7 +43,7 @@ class PySpwRmapTCPNode {
 
   auto Connect(std::chrono::milliseconds timeout = 500ms) -> void {
     auto res = node_.Connect(timeout);
-    if (!res.has_value()) {
+    if (!res.has_value()) [[unlikely]] {
       throw std::system_error(res.error());
     }
   }
@@ -51,12 +51,12 @@ class PySpwRmapTCPNode {
   auto Read(PyTargetNode target_node, uint32_t memory_adderss,
             uint32_t data_length) -> std::vector<uint8_t> {
     std::vector<uint8_t> data(data_length);
-    if (target_node.reply_address.size() >
-        spw_rmap::TargetNode::kMaxAddressLen) {
+    if (target_node.reply_address.size() > spw_rmap::TargetNode::kMaxAddressLen)
+        [[unlikely]] {
       throw std::out_of_range("Reply address length exceeds maximum allowed.");
     }
     if (target_node.target_spacewire_address.size() >
-        spw_rmap::TargetNode::kMaxAddressLen) {
+        spw_rmap::TargetNode::kMaxAddressLen) [[unlikely]] {
       throw std::out_of_range("Target address length exceeds maximum allowed.");
     }
 
@@ -65,7 +65,7 @@ class PySpwRmapTCPNode {
             .SetTargetAddress(std::move(target_node.target_spacewire_address))
             .SetReplyAddress(std::move(target_node.reply_address));
     auto res_read = node_.Read(spw_target_node, memory_adderss, data, 100ms);
-    if (!res_read) {
+    if (!res_read) [[unlikely]] {
       throw std::system_error(res_read.error());
     }
     return data;
@@ -74,11 +74,11 @@ class PySpwRmapTCPNode {
   void Write(PyTargetNode target_node, uint32_t memory_adderss,
              const std::vector<uint8_t>& data) {
     if (target_node.target_spacewire_address.size() >
-        spw_rmap::TargetNode::kMaxAddressLen) {
+        spw_rmap::TargetNode::kMaxAddressLen) [[unlikely]] {
       throw std::out_of_range("Target address length exceeds maximum allowed.");
     }
-    if (target_node.reply_address.size() >
-        spw_rmap::TargetNode::kMaxAddressLen) {
+    if (target_node.reply_address.size() > spw_rmap::TargetNode::kMaxAddressLen)
+        [[unlikely]] {
       throw std::out_of_range("Reply address length exceeds maximum allowed.");
     }
 
@@ -87,7 +87,7 @@ class PySpwRmapTCPNode {
             .SetTargetAddress(std::move(target_node.target_spacewire_address))
             .SetReplyAddress(std::move(target_node.reply_address));
     auto res_write = node_.Write(spw_target_node, memory_adderss, data, 100ms);
-    if (!res_write) {
+    if (!res_write) [[unlikely]] {
       throw std::system_error(res_write.error());
     }
   }

@@ -62,7 +62,7 @@ auto ParseUnsigned(std::string_view token, unsigned long long max_value)
     std::string temp(token);
     size_t idx = 0;
     auto value = std::stoull(temp, &idx, 0);
-    if (idx != temp.size() || value > max_value) {
+    if (idx != temp.size() || value > max_value) [[unlikely]] {
       return std::nullopt;
     }
     return value;
@@ -82,14 +82,14 @@ auto ParseByteSequence(int argc, char** argv, int& index,
     }
     ++index;
     auto value = ParseUnsigned(next, 0xFF);
-    if (!value.has_value()) {
+    if (!value.has_value()) [[unlikely]] {
       std::cerr << "Invalid value for --" << option << ": '" << next << "'\n";
       return false;
     }
     dst.push_back(static_cast<uint8_t>(*value));
     parsed = true;
   }
-  if (!parsed) {
+  if (!parsed) [[unlikely]] {
     std::cerr << "--" << option << " requires at least one byte.\n";
   }
   return parsed;
@@ -100,14 +100,14 @@ auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
 
   for (int i = 1; i < argc; ++i) {
     std::string_view arg = argv[i];
-    if (!arg.starts_with("--")) {
+    if (!arg.starts_with("--")) [[unlikely]] {
       std::cerr << "Unknown argument: " << arg << "\n";
       return std::nullopt;
     }
     auto name = arg.substr(2);
 
     auto take_value = [&](std::string_view opt) -> std::optional<std::string> {
-      if (i + 1 >= argc) {
+      if (i + 1 >= argc) [[unlikely]] {
         std::cerr << "--" << opt << " requires a value.\n";
         return std::nullopt;
       }
@@ -117,33 +117,35 @@ auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
     if (name == "ip") {
       if (auto v = take_value(name)) {
         opts.ip = std::move(*v);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "port") {
       if (auto v = take_value(name)) {
         opts.port = std::move(*v);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "target-address") {
-      if (!ParseByteSequence(argc, argv, i, opts.target_address, name)) {
+      if (!ParseByteSequence(argc, argv, i, opts.target_address, name))
+          [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "reply-address") {
-      if (!ParseByteSequence(argc, argv, i, opts.reply_address, name)) {
+      if (!ParseByteSequence(argc, argv, i, opts.reply_address, name))
+          [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "ntimes") {
       if (auto v = take_value(name)) {
         auto parsed =
             ParseUnsigned(*v, std::numeric_limits<std::size_t>::max());
-        if (!parsed.has_value() || *parsed == 0) {
+        if (!parsed.has_value() || *parsed == 0) [[unlikely]] {
           std::cerr << "Invalid --ntimes: '" << *v << "'\n";
           return std::nullopt;
         }
         opts.ntimes = static_cast<std::size_t>(*parsed);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "nbytes") {
@@ -151,57 +153,57 @@ auto ParseOptions(int argc, char** argv) -> std::optional<Options> {
         auto parsed =
             ParseUnsigned(*v, std::numeric_limits<std::size_t>::max());
         if (!parsed.has_value() || *parsed == 0 ||
-            *parsed > std::numeric_limits<uint32_t>::max()) {
+            *parsed > std::numeric_limits<uint32_t>::max()) [[unlikely]] {
           std::cerr << "--nbytes must be within [1, 0xFFFFFFFF].\n";
           return std::nullopt;
         }
         opts.nbytes = static_cast<std::size_t>(*parsed);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "start_address") {
       if (auto v = take_value(name)) {
         auto parsed = ParseUnsigned(*v, std::numeric_limits<uint32_t>::max());
-        if (!parsed.has_value()) {
+        if (!parsed.has_value()) [[unlikely]] {
           std::cerr << "Invalid --start_address: '" << *v << "'\n";
           return std::nullopt;
         }
         opts.start_address = static_cast<uint32_t>(*parsed);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "out") {
       if (auto v = take_value(name)) {
         opts.out_path = std::move(*v);
-      } else {
+      } else [[unlikely]] {
         return std::nullopt;
       }
     } else if (name == "help") {
       PrintUsage(argv[0]);
       std::exit(0);
-    } else {
+    } else [[unlikely]] {
       std::cerr << "Unknown option: --" << name << "\n";
       return std::nullopt;
     }
   }
 
-  if (opts.target_address.empty()) {
+  if (opts.target_address.empty()) [[unlikely]] {
     std::cerr << "--target-address is required.\n";
     return std::nullopt;
   }
-  if (opts.reply_address.empty()) {
+  if (opts.reply_address.empty()) [[unlikely]] {
     std::cerr << "--reply-address is required.\n";
     return std::nullopt;
   }
-  if (!opts.ntimes.has_value()) {
+  if (!opts.ntimes.has_value()) [[unlikely]] {
     std::cerr << "--ntimes is required.\n";
     return std::nullopt;
   }
-  if (!opts.nbytes.has_value()) {
+  if (!opts.nbytes.has_value()) [[unlikely]] {
     std::cerr << "--nbytes is required.\n";
     return std::nullopt;
   }
-  if (!opts.start_address.has_value()) {
+  if (!opts.start_address.has_value()) [[unlikely]] {
     std::cerr << "--start_address is required.\n";
     return std::nullopt;
   }
@@ -275,7 +277,7 @@ void TrySetHighestPriority() {
     sp.sched_priority = sched_get_priority_max(SCHED_FIFO);
 
     int ret = pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp);
-    if (ret != 0) {
+    if (ret != 0) [[unlikely]] {
       std::cerr << "Warning: failed to set SCHED_FIFO: " << std::strerror(ret)
                 << '\n';
     } else {
@@ -289,7 +291,7 @@ void TrySetHighestPriority() {
     CPU_SET(0, &set);  // 必要に応じてコア番号は変更する
 
     int ret = pthread_setaffinity_np(pthread_self(), sizeof(set), &set);
-    if (ret != 0) {
+    if (ret != 0) [[unlikely]] {
       std::cerr << "Warning: failed to set CPU affinity: " << std::strerror(ret)
                 << '\n';
     } else {
@@ -298,14 +300,14 @@ void TrySetHighestPriority() {
   }
 
   errno = 0;
-  if (setpriority(PRIO_PROCESS, 0, -20) != 0) {
+  if (setpriority(PRIO_PROCESS, 0, -20) != 0) [[unlikely]] {
     std::cerr << "Warning: failed to raise CPU priority (nice): "
               << std::strerror(errno) << '\n';
   }
 
 #elif defined(__APPLE__)
   errno = 0;
-  if (setpriority(PRIO_PROCESS, 0, -20) != 0) {
+  if (setpriority(PRIO_PROCESS, 0, -20) != 0) [[unlikely]] {
     std::cerr << "Warning: failed to raise CPU priority (nice): "
               << std::strerror(errno) << '\n';
   } else {
@@ -319,7 +321,7 @@ void TrySetHighestPriority() {
 
 auto main(int argc, char** argv) -> int {
   auto options = ParseOptions(argc, argv);
-  if (!options) {
+  if (!options) [[unlikely]] {
     PrintUsage(argv[0]);
     return 1;
   }
@@ -330,7 +332,7 @@ auto main(int argc, char** argv) -> int {
   std::ofstream out_file;
   if (opts.out_path) {
     out_file.open(*opts.out_path, std::ios::out | std::ios::trunc);
-    if (!out_file.is_open()) {
+    if (!out_file.is_open()) [[unlikely]] {
       std::cerr << "Failed to open output file: " << *opts.out_path << "\n";
       return 1;
     }
@@ -344,7 +346,7 @@ auto main(int argc, char** argv) -> int {
                          static_cast<unsigned long long>(total_bytes);
   if (range_end >
       static_cast<unsigned long long>(std::numeric_limits<uint32_t>::max()) +
-          1ULL) {
+          1ULL) [[unlikely]] {
     std::cerr << "--start_address + --nbytes exceeds 32-bit address space.\n";
     return 1;
   }
@@ -362,7 +364,7 @@ auto main(int argc, char** argv) -> int {
   client.SetAutoPollingMode(true);
 
   auto connect_res = client.Connect(1s);
-  if (!connect_res.has_value()) {
+  if (!connect_res.has_value()) [[unlikely]] {
     std::cerr << "Failed to connect: " << connect_res.error().message() << "\n";
     return 1;
   }
@@ -377,10 +379,11 @@ auto main(int argc, char** argv) -> int {
     std::span<const uint8_t> chunk_span(pattern.data() + offset, chunk);
     auto res = client.Write(
         target, base_address + static_cast<uint32_t>(offset), chunk_span);
-    if (!res.has_value()) {
+    if (!res.has_value()) [[unlikely]] {
       std::cerr << "Write failed at offset " << offset << ": "
                 << res.error().message() << "\n";
-      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value())
+          [[unlikely]] {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
@@ -396,10 +399,11 @@ auto main(int argc, char** argv) -> int {
     std::vector<uint8_t> warmup_buffer{};
     warmup_buffer.resize(4);
     auto res = client.Read(target, base_address, warmup_buffer);
-    if (!res.has_value()) {
+    if (!res.has_value()) [[unlikely]] {
       std::cerr << "Warm-up read failed during iteration " << (iter + 1) << ": "
                 << res.error().message() << "\n";
-      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value())
+          [[unlikely]] {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
@@ -411,20 +415,22 @@ auto main(int argc, char** argv) -> int {
     const auto start_time = Clock::now();
     auto res = client.Read(target, base_address, std::span(read_buffer));
     const auto end_time = Clock::now();
-    if (!res.has_value()) {
+    if (!res.has_value()) [[unlikely]] {
       std::cerr << "Read failed during iteration " << (iter + 1) << ": "
                 << res.error().message() << "\n";
-      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value())
+          [[unlikely]] {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
       return 1;
     }
 
-    if (!std::ranges::equal(read_buffer, pattern)) {
+    if (!std::ranges::equal(read_buffer, pattern)) [[unlikely]] {
       std::cerr << "Data mismatch detected during iteration " << (iter + 1)
                 << "\n";
-      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value()) {
+      if (auto shutdown_res = client.Shutdown(); !shutdown_res.has_value())
+          [[unlikely]] {
         std::cerr << "Shutdown error: " << shutdown_res.error().message()
                   << "\n";
       }
@@ -458,7 +464,7 @@ auto main(int argc, char** argv) -> int {
             << " iterations.\n";
 
   auto shutdown_res = client.Shutdown();
-  if (!shutdown_res.has_value()) {
+  if (!shutdown_res.has_value()) [[unlikely]] {
     std::cerr << "Shutdown error: " << shutdown_res.error().message() << "\n";
     return 1;
   }

@@ -14,26 +14,26 @@ struct type_caster<std::span<T>> {
   py::buffer owner_{};
 
   [[nodiscard]] bool load(handle src, bool /*convert*/) {
-    if (!PyObject_CheckBuffer(src.ptr())) {
+    if (!PyObject_CheckBuffer(src.ptr())) [[unlikely]] {
       return false;
     }
     owner_ = py::reinterpret_borrow<py::buffer>(src);
     py::buffer_info info = owner_.request();
 
-    if (info.ndim != 1) {
+    if (info.ndim != 1) [[unlikely]] {
       return false;
     }
     if (static_cast<std::size_t>(info.itemsize) !=
-        sizeof(std::remove_const_t<T>)) {
+        sizeof(std::remove_const_t<T>)) [[unlikely]] {
       return false;
     }
     if (!info.strides.empty() &&
-        info.strides[0] !=
-            static_cast<py::ssize_t>(sizeof(std::remove_const_t<T>))) {
+        info.strides[0] != static_cast<py::ssize_t>(
+                               sizeof(std::remove_const_t<T>))) [[unlikely]] {
       return false;
     }
     if constexpr (!std::is_const_v<T>) {
-      if (info.readonly) {
+      if (info.readonly) [[unlikely]] {
         return false;
       }
     }

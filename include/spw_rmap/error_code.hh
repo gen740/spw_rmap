@@ -35,7 +35,7 @@ class RMAPStatusCodeCategory final : public std::error_category {
       case RMAPParseStatus::kUnknownProtocolIdentifier:
         return "Unknown protocol identifier";
       default:
-        return "Unknown status code";
+        [[unlikely]] return "Unknown status code";
     }
   }
 };
@@ -80,7 +80,7 @@ class RMAPReplyStatusCategory final : public std::error_category {
       case PacketStatusCode::kInvalidTargetLogicalAddress:
         return "Invalid target logical address";
       default:
-        return "Unknown RMAP reply status";
+        [[unlikely]] return "Unknown RMAP reply status";
     }
   }
 };

@@ -57,7 +57,7 @@ class TransactionDatabase {
         const bool timed_out = has_callback && timeout_.count() > 0 &&
                                (now - entry.last_used > timeout_);
         if (entry.available || timed_out) [[likely]] {
-          if (!entry.available && timed_out) {
+          if (!entry.available && timed_out) [[unlikely]] {
             spw_rmap::debug::Debug(
                 "TransactionDatabase::acquire: Reusing timed-out transaction "
                 "ID ",
@@ -68,7 +68,7 @@ class TransactionDatabase {
           entry.last_used = now;
           entry.callback = std::move(callback);
           lock.unlock();
-          if (timeout_callback) {
+          if (timeout_callback) [[unlikely]] {
             timeout_callback(
                 std::unexpected(std::make_error_code(std::errc::timed_out)));
           }
@@ -86,7 +86,7 @@ class TransactionDatabase {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       auto* entry = GetEntry(transaction_id);
-      if (entry == nullptr || !entry->callback) {
+      if (entry == nullptr || !entry->callback) [[unlikely]] {
         return false;
       }
       callback = std::move(entry->callback);

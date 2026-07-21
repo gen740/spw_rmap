@@ -124,17 +124,18 @@ static auto SocketAlive(int fd) noexcept -> bool {
 #ifdef POLLRDHUP
                      | POLLRDHUP
 #endif
-                     )) {
+                     )) [[unlikely]] {
     return false;
   }
   if ((pfd.revents & POLLIN) != 0) [[unlikely]] {
     uint8_t tmp{};
     const ssize_t n = ::recv(fd, &tmp, 1, MSG_PEEK | MSG_DONTWAIT);
-    if (n == 0) {
+    if (n == 0) [[unlikely]] {
       return false;
     }
     const int err = errno;
-    if (n < 0 && err != EAGAIN && err != EWOULDBLOCK && err != EINTR) {
+    if (n < 0 && err != EAGAIN && err != EWOULDBLOCK && err != EINTR)
+        [[unlikely]] {
       LogErrno("recv peek failed while checking server socket", err);
       return false;
     }
@@ -193,7 +194,7 @@ auto TCPServer::AcceptOnce() noexcept -> std::expected<void, std::error_code> {
     }
 
     last = internal::SetListeningSockopt(listen_fd_);
-    if (!last.has_value()) {
+    if (!last.has_value()) [[unlikely]] {
       CloseRetry(listen_fd_);
       listen_fd_ = -1;
       continue;
@@ -366,7 +367,7 @@ auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
       if (err == EINTR) {
         continue;
       }
-      if (err == EAGAIN || err == EWOULDBLOCK) {
+      if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Send would block, timing out");
         drop_client();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
@@ -376,7 +377,7 @@ auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
       return std::unexpected{std::error_code(err, std::system_category())};
     }
     if (n == 0) {
-      if (retried_zero) {
+      if (retried_zero) [[unlikely]] {
         spw_rmap::debug::Debug("Send returned zero twice, treating as error");
         drop_client();
         return std::unexpected{std::make_error_code(std::errc::io_error)};
@@ -386,26 +387,26 @@ auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
       do {
         prc = ::poll(&pfd, 1, 10);
       } while (prc < 0 && errno == EINTR);
-      if (prc == 0) {
+      if (prc == 0) [[unlikely]] {
         spw_rmap::debug::Debug("Poll timed out after send returned zero");
         drop_client();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
-      if (prc < 0) {
+      if (prc < 0) [[unlikely]] {
         const int poll_err = errno;
         LogErrno("Poll failed after send returned zero", poll_err);
         drop_client();
         return std::unexpected{
             std::error_code(poll_err, std::system_category())};
       }
-      if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
+      if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket error after send returned zero, treating as closed");
         drop_client();
         return std::unexpected{
             std::make_error_code(std::errc::connection_aborted)};
       }
-      if ((pfd.revents & POLLOUT) == 0) {
+      if ((pfd.revents & POLLOUT) == 0) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket not writable after send returned zero, treating as error");
         drop_client();
@@ -440,7 +441,7 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
       if (err == EINTR) {
         continue;
       }
-      if (err == EAGAIN || err == EWOULDBLOCK) {
+      if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Receive would block, timing out");
         drop_client();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
@@ -448,7 +449,7 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
       LogErrno("Receive failed", err);
       drop_client();
       return std::unexpected{std::error_code(err, std::system_category())};
-    } else if (n == 0) {
+    } else if (n == 0) [[unlikely]] {
       spw_rmap::debug::Debug("Client closed connection");
       drop_client();
       return std::unexpected{std::make_error_code(std::errc::io_error)};

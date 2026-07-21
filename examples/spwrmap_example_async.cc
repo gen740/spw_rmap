@@ -11,7 +11,7 @@ auto main() -> int {
   spw_rmap::SpwRmapTCPClient client(
       {.ip_address = "192.168.1.100", .port = "10030"});
   client.SetInitiatorLogicalAddress(0xFE);
-  if (auto res = client.Connect(1s); !res.has_value()) {
+  if (auto res = client.Connect(1s); !res.has_value()) [[unlikely]] {
     std::cerr << "Connect failed: " << res.error().message() << '\n';
     return 1;
   }
@@ -23,7 +23,7 @@ auto main() -> int {
 
   std::thread loop([&client]() -> void {
     auto res = client.RunLoop();
-    if (!res.has_value()) {
+    if (!res.has_value()) [[unlikely]] {
       std::cerr << "runLoop error: " << res.error().message() << '\n';
     }
   });
@@ -32,8 +32,8 @@ auto main() -> int {
   const std::array<uint8_t, 4> kPayload{0x01, 0x02, 0x03, 0x04};
 
   bool ok = true;
-  if (auto res = client.Write(target, kDemoAddress, kPayload);
-      !res.has_value()) {
+  if (auto res = client.Write(target, kDemoAddress, kPayload); !res.has_value())
+      [[unlikely]] {
     std::cerr << "Sync write failed: " << res.error().message() << '\n';
     ok = false;
   } else {
@@ -45,7 +45,7 @@ auto main() -> int {
         std::cout << " 0x" << std::hex << +byte;
       }
       std::cout << std::dec << '\n';
-    } else {
+    } else [[unlikely]] {
       std::cerr << "Sync read failed: " << res.error().message() << '\n';
       ok = false;
     }
@@ -58,12 +58,12 @@ auto main() -> int {
             -> void {
           if (packet.has_value()) {
             std::cout << "Async write completed\n";
-          } else {
+          } else [[unlikely]] {
             std::cerr << "Async write error: " << packet.error().message()
                       << '\n';
           }
         });
-    if (!write_async_res.has_value()) {
+    if (!write_async_res.has_value()) [[unlikely]] {
       std::cerr << "Async write failed\n";
       ok = false;
     }
@@ -78,18 +78,18 @@ auto main() -> int {
                       << " bytes\n";
           }
         });
-    if (!read_res.has_value()) {
+    if (!read_res.has_value()) [[unlikely]] {
       std::cerr << "Async read failed\n";
     }
   }
 
-  if (auto res = client.Stop(); !res.has_value()) {
+  if (auto res = client.Stop(); !res.has_value()) [[unlikely]] {
     std::cerr << "Stop error: " << res.error().message() << '\n';
   }
   if (loop.joinable()) {
     loop.join();
   }
-  if (auto res = client.Shutdown(); !res.has_value()) {
+  if (auto res = client.Shutdown(); !res.has_value()) [[unlikely]] {
     std::cerr << "Shutdown error: " << res.error().message() << '\n';
   }
   return 0;

@@ -18,7 +18,8 @@ auto main() -> int {
 
   // 接続
   auto res = client.Connect(1s);
-  if (!res) exit(1);
+  if (!res) [[unlikely]]
+    exit(1);
 
   // ターゲットノードの作成
   auto target = spw_rmap::TargetNode(0x32);
@@ -29,12 +30,14 @@ auto main() -> int {
 
   // 書き込み
   res = client.Write(target, 0x44A20000, kPayload);
-  if (!res) exit(1);
+  if (!res) [[unlikely]]
+    exit(1);
 
   // 読み込み
   std::array<uint8_t, 4> buf{};
   res = client.Read(target, kAddr, std::span(buf));
-  if (!res) exit(1);
+  if (!res) [[unlikely]]
+    exit(1);
 
   std::cout << "Read:";
   for (auto b : buf) std::cout << " 0x" << std::hex << +b;
@@ -42,7 +45,8 @@ auto main() -> int {
 
   // シャットダウン
   res = client.Shutdown();
-  if (!res) exit(1);
+  if (!res) [[unlikely]]
+    exit(1);
 
   return 0;
 }

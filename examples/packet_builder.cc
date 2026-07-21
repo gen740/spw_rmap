@@ -35,7 +35,7 @@ auto main() -> int {
 
   std::vector<uint8_t> buffer(config.ExpectedSize());
   auto res = spw_rmap::BuildReadPacket(config, buffer);
-  if (!res.has_value()) {
+  if (!res.has_value()) [[unlikely]] {
     std::cerr << "Failed to build packet: " << res.error().message() << '\n';
     return 1;
   }

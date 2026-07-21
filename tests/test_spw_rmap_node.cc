@@ -16,6 +16,7 @@
 
 #include "spw_rmap/internal/spw_rmap_tcp_node_impl.hh"
 #include "spw_rmap/packet_builder.hh"
+#include "spw_rmap/spw_rmap_tcp_node.hh"
 #include "spw_rmap/target_node.hh"
 
 namespace {
@@ -183,6 +184,13 @@ class TestNode : public spw_rmap::internal::SpwRmapTCPNodeImpl<MockBackend> {
   auto Backend() -> MockBackend& { return *GetBackend(); }
 };
 
+class NullBackendTCPClient : public spw_rmap::SpwRmapTCPClient {
+ public:
+  using SpwRmapTCPClient::SpwRmapTCPClient;
+
+  auto ResetBackend() noexcept -> void { GetBackend().reset(); }
+};
+
 auto MakeFrame(std::span<const uint8_t> payload, uint8_t type = 0x00)
     -> std::vector<uint8_t> {
   std::vector<uint8_t> frame(12 + payload.size());
@@ -337,6 +345,46 @@ TEST(SpwRmapTCPNodeImplTest, EnsureConnectionAfterShutdownBackendIsSafe) {
 
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), std::make_error_code(std::errc::not_connected));
+}
+
+TEST(SpwRmapTCPNodeImplTest, PublicOperationsAfterShutdownReturnNotConnected) {
+  TestNode node(MakeNodeConfig());
+  ASSERT_TRUE(node.Shutdown().has_value());
+
+  auto target_node = spw_rmap::TargetNode(0x34);
+  std::array<uint8_t, 1> data{0x12};
+  auto expect_not_connected = [](const auto& result) -> void {
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), std::make_error_code(std::errc::not_connected));
+  };
+
+  expect_not_connected(node.Poll());
+  expect_not_connected(node.RunLoop());
+  expect_not_connected(node.Write(target_node, 0x1000, data));
+  expect_not_connected(node.WriteAsync(target_node, 0x1000, data, [](auto) {}));
+  expect_not_connected(node.Read(target_node, 0x1000, data));
+  expect_not_connected(
+      node.ReadAsync(target_node, 0x1000, data.size(), [](auto) {}));
+  expect_not_connected(node.EmitTimeCode(0x12));
+}
+
+TEST(SpwRmapTCPClientTest, LifecycleOperationsWithNullBackendAreSafe) {
+  NullBackendTCPClient client(MakeNodeConfig());
+  client.ResetBackend();
+
+  auto connect_result = client.Connect();
+  ASSERT_FALSE(connect_result.has_value());
+  EXPECT_EQ(connect_result.error(),
+            std::make_error_code(std::errc::not_connected));
+
+  auto timeout_result = client.SetSendTimeout(std::chrono::milliseconds(100));
+  ASSERT_FALSE(timeout_result.has_value());
+  EXPECT_EQ(timeout_result.error(),
+            std::make_error_code(std::errc::not_connected));
+
+  EXPECT_TRUE(client.Stop().has_value());
+  EXPECT_TRUE(client.Shutdown().has_value());
+  EXPECT_TRUE(client.IsShutdowned());
 }
 
 TEST(SpwRmapTCPNodeImplTest, StopInterruptsBlockingRunLoop) {
@@ -616,6 +664,58 @@ TEST(SpwRmapTCPNodeImplTest, IgnoredFrameDoesNotConsumeFollowingPacket) {
   std::array<uint8_t, 3> ignored{0xAA, 0xBB, 0xCC};
   node.EnqueueIncoming(MakeFrame(ignored, 0x01));
   node.EnqueueIncoming(BuildWriteReplyFrame(*transaction));
+
+  auto result = node.Poll();
+
+  EXPECT_TRUE(result.has_value()) << result.error().message();
+  EXPECT_TRUE(callback_called.load());
+}
+
+TEST(SpwRmapTCPNodeImplTest, IgnoredFrameDiscardsEarlierContinuation) {
+  TestNode node(MakeNodeConfig());
+  std::atomic<bool> callback_called{false};
+  auto target_node = spw_rmap::TargetNode(0x34);
+  std::array<uint8_t, 1> data{0x12};
+  auto transaction = node.WriteAsync(target_node, 0x1000, data,
+                                     [&callback_called](auto result) -> void {
+                                       callback_called = result.has_value();
+                                     });
+  ASSERT_TRUE(transaction.has_value());
+
+  std::array<uint8_t, 2> abandoned_continuation{0xAA, 0xBB};
+  std::array<uint8_t, 1> ignored{0xCC};
+  node.EnqueueIncoming(MakeFrame(abandoned_continuation, 0x02));
+  node.EnqueueIncoming(MakeFrame(ignored, 0x01));
+  node.EnqueueIncoming(BuildWriteReplyFrame(*transaction));
+
+  auto result = node.Poll();
+
+  EXPECT_TRUE(result.has_value()) << result.error().message();
+  EXPECT_TRUE(callback_called.load());
+}
+
+TEST(SpwRmapTCPNodeImplTest, ManyIgnoredFramesDoNotGrowTheCallStack) {
+  TestNode node(MakeNodeConfig());
+  std::atomic<bool> callback_called{false};
+  auto target_node = spw_rmap::TargetNode(0x34);
+  std::array<uint8_t, 1> data{0x12};
+  auto transaction = node.WriteAsync(target_node, 0x1000, data,
+                                     [&callback_called](auto result) -> void {
+                                       callback_called = result.has_value();
+                                     });
+  ASSERT_TRUE(transaction.has_value());
+
+  constexpr std::size_t kIgnoredFrameCount = 10'000;
+  const auto ignored_frame = MakeFrame(std::array<uint8_t, 1>{0xAA}, 0x01);
+  const auto reply_frame = BuildWriteReplyFrame(*transaction);
+  std::vector<uint8_t> incoming;
+  incoming.reserve(kIgnoredFrameCount * ignored_frame.size() +
+                   reply_frame.size());
+  for (std::size_t i = 0; i < kIgnoredFrameCount; ++i) {
+    incoming.insert(incoming.end(), ignored_frame.begin(), ignored_frame.end());
+  }
+  incoming.insert(incoming.end(), reply_frame.begin(), reply_frame.end());
+  node.EnqueueIncoming(incoming);
 
   auto result = node.Poll();
 
