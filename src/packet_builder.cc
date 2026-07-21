@@ -175,6 +175,15 @@ auto BuildReadReplyPacket(const ReadReplyPacketConfig& config,
   out[head++] = (config.target_logical_address);
   out[head++] = (static_cast<uint8_t>(config.transaction_id >> 8));
   out[head++] = (static_cast<uint8_t>(config.transaction_id & 0xFF));
+
+  if (config.status != PacketStatusCode::kCommandExecutedSuccessfully) {
+    auto crc = crc::CalcCrc(
+        std::span(out).subspan(config.reply_spw_address.size(),
+                               head - config.reply_spw_address.size()));
+    out[head++] = (crc);
+    return head;
+  }
+
   out[head++] = (0x00);  // Reserved byte
   auto dataLength = config.data.size();
   out[head++] = (static_cast<uint8_t>((dataLength >> 16) & 0xFF));

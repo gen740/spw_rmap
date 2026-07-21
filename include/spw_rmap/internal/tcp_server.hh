@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -20,15 +21,19 @@ namespace spw_rmap::internal {
  *
  * This TCPServer is supposed to be used for RMAP communication over TCP.
  * This server accepts a single connection at a time.
- * Calls that access the socket must be serialized by the owner; this class is
- * not safe for concurrent send, receive, accept, and shutdown operations.
  */
 class TCPServer {
  private:
   int listen_fd_ = -1;  // listening socket
   int client_fd_ = -1;  // accepted client socket
+  bool shutdown_requested_{false};
+
+  std::mutex lifecycle_mtx_;
+  std::mutex send_mtx_;
+  std::mutex receive_mtx_;
 
   static auto CloseRetry(int fd) noexcept -> void;
+  auto AcceptOnceUnlocked() noexcept -> std::expected<void, std::error_code>;
   std::string bind_address_;
   std::string port_;
   std::optional<std::chrono::microseconds> last_send_timeout_{};

@@ -160,6 +160,9 @@ TEST(spw_rmap, ReadReplyPacket) {
         .increment_mode = RandomByte() % 2 == 0,
         .data = data,
     };
+    if (c.status != PacketStatusCode::kCommandExecutedSuccessfully) {
+      c.data = {};
+    }
 
     std::vector<uint8_t> packet;
     packet.resize(c.ExpectedSize());

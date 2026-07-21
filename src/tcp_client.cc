@@ -45,10 +45,7 @@ inline void LogErrno(const char* msg, int err) noexcept {
 
 static auto CloseRetry(int fd) noexcept -> void {
   if (fd >= 0) [[likely]] {
-    auto r = 0;
-    do {
-      r = ::close(fd);
-    } while (r < 0 && errno == EINTR);
+    std::ignore = ::close(fd);
   }
 }
 

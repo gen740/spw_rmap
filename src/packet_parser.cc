@@ -78,10 +78,15 @@ auto ParseReadReplyPacket(Packet& packet,
                           const std::span<const uint8_t> data) noexcept
     -> std::expected<Packet, std::error_code> {
   size_t head = 0;
-  if (data.size() < 12) [[unlikely]] {
+  if (data.size() < 8) [[unlikely]] {
     return std::unexpected(make_error_code(RMAPParseStatus::kIncompletePacket));
   }
-  if (crc::CalcCrc(data.subspan(0, 12)) != 0x00) [[unlikely]] {
+  const uint8_t status_byte = data[3];
+  const size_t header_size = (status_byte == 0) ? 12 : 8;
+  if (data.size() < header_size) [[unlikely]] {
+    return std::unexpected(make_error_code(RMAPParseStatus::kIncompletePacket));
+  }
+  if (crc::CalcCrc(data.subspan(0, header_size)) != 0x00) [[unlikely]] {
     return std::unexpected(make_error_code(RMAPParseStatus::kHeaderCrcError));
   }
   packet.initiator_logical_address = data[head++];
@@ -95,6 +100,13 @@ auto ParseReadReplyPacket(Packet& packet,
   packet.transaction_id = 0;
   packet.transaction_id |= (data[head++] << 8);
   packet.transaction_id |= (data[head++] << 0);
+
+  if (packet.status != PacketStatusCode::kCommandExecutedSuccessfully) {
+    packet.data_length = 0;
+    packet.data = {};
+    return packet;
+  }
+
   if (data[head++] != 0x00) [[unlikely]] {
     return std::unexpected(make_error_code(RMAPParseStatus::kInvalidHeader));
   }

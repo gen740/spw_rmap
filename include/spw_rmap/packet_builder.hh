@@ -93,6 +93,9 @@ struct ReadReplyPacketConfig {
   std::span<const uint8_t> data;
 
   [[nodiscard]] auto ExpectedSize() const noexcept -> size_t {
+    if (status != PacketStatusCode::kCommandExecutedSuccessfully) {
+      return reply_spw_address.size() + 8;
+    }
     return reply_spw_address.size() + 12 + data.size() + 1;
   }
 };

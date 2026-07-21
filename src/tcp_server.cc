@@ -147,10 +147,7 @@ auto TCPServer::CloseRetry(int fd) noexcept -> void {
   if (fd < 0) [[unlikely]] {
     return;
   }
-  int r = 0;
-  do {
-    r = ::close(fd);
-  } while (r < 0 && errno == EINTR);
+  std::ignore = ::close(fd);
 }
 
 struct GaiCategoryT final : std::error_category {
@@ -168,6 +165,11 @@ static inline auto GaiCategory() noexcept -> const std::error_category& {
 }
 
 auto TCPServer::AcceptOnce() noexcept -> std::expected<void, std::error_code> {
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
+  return AcceptOnceUnlocked();
+}
+
+auto TCPServer::AcceptOnceUnlocked() noexcept -> std::expected<void, std::error_code> {
   addrinfo hints{};
   hints.ai_family = AF_UNSPEC;  // IPv4/IPv6 both
   hints.ai_socktype = SOCK_STREAM;
@@ -260,6 +262,7 @@ auto TCPServer::AcceptOnce() noexcept -> std::expected<void, std::error_code> {
     ResetTimeoutCache();
     return last;
   }
+  shutdown_requested_ = false;
   CloseRetry(listen_fd_);
   listen_fd_ = -1;
   return {};
@@ -267,16 +270,19 @@ auto TCPServer::AcceptOnce() noexcept -> std::expected<void, std::error_code> {
 
 auto TCPServer::EnsureConnect() noexcept
     -> std::expected<void, std::error_code> {
+  std::lock_guard<std::mutex> send_lock(send_mtx_);
+  std::lock_guard<std::mutex> lifecycle_lock(lifecycle_mtx_);
   if (client_fd_ >= 0 && SocketAlive(client_fd_)) [[likely]] {
     return {};
   }
-  if (client_fd_ >= 0) [[likely]] {
+  if (client_fd_ >= 0) [[unlikely]] {
     spw_rmap::debug::Debug("Client socket unhealthy, reopening server socket");
     CloseRetry(client_fd_);
     client_fd_ = -1;
     ResetTimeoutCache();
+    shutdown_requested_ = false;
   }
-  return AcceptOnce();
+  return AcceptOnceUnlocked();
 }
 
 TCPServer::~TCPServer() noexcept {
@@ -289,9 +295,13 @@ TCPServer::~TCPServer() noexcept {
 
 auto TCPServer::SetSendTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::Debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (client_fd_ < 0 || shutdown_requested_) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::not_connected)};
   }
   if (client_fd_ >= 0 && last_send_timeout_.has_value() &&
       *last_send_timeout_ == timeout) [[likely]] {
@@ -317,9 +327,13 @@ auto TCPServer::SetSendTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPServer::SetReceiveTimeout(std::chrono::microseconds timeout) noexcept
     -> std::expected<void, std::error_code> {
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   if (timeout < std::chrono::microseconds::zero()) [[unlikely]] {
     spw_rmap::debug::Debug("Negative timeout value");
     return std::unexpected{std::make_error_code(std::errc::invalid_argument)};
+  }
+  if (client_fd_ < 0 || shutdown_requested_) [[unlikely]] {
+    return std::unexpected{std::make_error_code(std::errc::not_connected)};
   }
   if (client_fd_ >= 0 && last_receive_timeout_.has_value() &&
       *last_receive_timeout_ == timeout) [[likely]] {
@@ -345,15 +359,11 @@ auto TCPServer::SetReceiveTimeout(std::chrono::microseconds timeout) noexcept
 
 auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
     -> std::expected<void, std::error_code> {
+  std::lock_guard<std::mutex> send_lock(send_mtx_);
   if (client_fd_ < 0) [[unlikely]] {
     spw_rmap::debug::Debug("Client socket not connected");
     return std::unexpected{std::make_error_code(std::errc::not_connected)};
   }
-  const auto drop_client = [this]() noexcept {
-    CloseRetry(client_fd_);
-    client_fd_ = -1;
-    ResetTimeoutCache();
-  };
   bool retried_zero = false;
   while (!data.empty()) {
 #ifndef __APPLE__
@@ -369,17 +379,17 @@ auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Send would block, timing out");
-        drop_client();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Send failed", err);
-      drop_client();
+      std::ignore = Shutdown();
       return std::unexpected{std::error_code(err, std::system_category())};
     }
     if (n == 0) {
       if (retried_zero) [[unlikely]] {
         spw_rmap::debug::Debug("Send returned zero twice, treating as error");
-        drop_client();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::io_error)};
       }
       pollfd pfd{.fd = client_fd_, .events = POLLOUT, .revents = 0};
@@ -389,27 +399,27 @@ auto TCPServer::SendAll(std::span<const uint8_t> data) noexcept
       } while (prc < 0 && errno == EINTR);
       if (prc == 0) [[unlikely]] {
         spw_rmap::debug::Debug("Poll timed out after send returned zero");
-        drop_client();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       if (prc < 0) [[unlikely]] {
         const int poll_err = errno;
         LogErrno("Poll failed after send returned zero", poll_err);
-        drop_client();
+        std::ignore = Shutdown();
         return std::unexpected{
             std::error_code(poll_err, std::system_category())};
       }
       if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket error after send returned zero, treating as closed");
-        drop_client();
+        std::ignore = Shutdown();
         return std::unexpected{
             std::make_error_code(std::errc::connection_aborted)};
       }
       if ((pfd.revents & POLLOUT) == 0) [[unlikely]] {
         spw_rmap::debug::Debug(
             "Socket not writable after send returned zero, treating as error");
-        drop_client();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::io_error)};
       }
       retried_zero = true;
@@ -425,15 +435,11 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
   if (buf.empty()) {
     return 0U;
   }
+  std::lock_guard<std::mutex> receive_lock(receive_mtx_);
   if (client_fd_ < 0) [[unlikely]] {
     spw_rmap::debug::Debug("Client socket not connected");
     return std::unexpected{std::make_error_code(std::errc::not_connected)};
   }
-  const auto drop_client = [this]() noexcept {
-    CloseRetry(client_fd_);
-    client_fd_ = -1;
-    ResetTimeoutCache();
-  };
   for (;;) {
     const ssize_t n = ::recv(client_fd_, buf.data(), buf.size(), 0);
     if (n < 0) [[unlikely]] {
@@ -443,15 +449,15 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
       }
       if (err == EAGAIN || err == EWOULDBLOCK) [[unlikely]] {
         spw_rmap::debug::Debug("Receive would block, timing out");
-        drop_client();
+        std::ignore = Shutdown();
         return std::unexpected{std::make_error_code(std::errc::timed_out)};
       }
       LogErrno("Receive failed", err);
-      drop_client();
+      std::ignore = Shutdown();
       return std::unexpected{std::error_code(err, std::system_category())};
     } else if (n == 0) [[unlikely]] {
       spw_rmap::debug::Debug("Client closed connection");
-      drop_client();
+      std::ignore = Shutdown();
       return std::unexpected{std::make_error_code(std::errc::io_error)};
     }
     return static_cast<std::size_t>(n);
@@ -459,16 +465,21 @@ auto TCPServer::RecvSome(std::span<uint8_t> buf) noexcept
 }
 
 auto TCPServer::Shutdown() noexcept -> std::expected<void, std::error_code> {
+  std::lock_guard<std::mutex> lock(lifecycle_mtx_);
   if (client_fd_ < 0) [[unlikely]] {
     spw_rmap::debug::Debug("Client socket not connected");
     return std::unexpected(
         std::make_error_code(std::errc::bad_file_descriptor));
+  }
+  if (shutdown_requested_) {
+    return {};
   }
   if (::shutdown(client_fd_, SHUT_RDWR) < 0) [[unlikely]] {
     const int err = errno;
     LogErrno("Failed to shutdown client socket", err);
     return std::unexpected(std::error_code(err, std::generic_category()));
   }
+  shutdown_requested_ = true;
   return {};
 }
 
