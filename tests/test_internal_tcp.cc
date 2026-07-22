@@ -139,15 +139,18 @@ TEST(TcpClientServer, ServerRecieve) {
   }
 
   std::atomic<bool> server_stop{false};
+  std::atomic<bool> server_ready{false};
+  std::atomic_size_t server_received{0};
   std::vector<uint8_t> server_recv_buf;
 
   server_recv_buf.resize(TEST_BUFFER_SIZE);
-  bool server_emit_error = false;
+  std::atomic<bool> server_emit_error{false};
 
   std::thread th([&]() -> void {
     try {
       std::string port_str = std::to_string(port);
       TCPServer server("127.0.0.1", port_str);
+      server_ready.store(true, std::memory_order_release);
       auto res = server.AcceptOnce();
       if (!res.has_value()) {
         FAIL() << "Failed to accept connection: " << res.error().message();
@@ -164,6 +167,7 @@ TEST(TcpClientServer, ServerRecieve) {
         std::ranges::copy(std::span(buf).subspan(0, *n),
                           server_recv_buf.begin() + total_recvd);
         total_recvd += *n;
+        server_received.store(total_recvd, std::memory_order_release);
         if (total_recvd == TEST_BUFFER_SIZE) {
           break;
         }
@@ -171,9 +175,22 @@ TEST(TcpClientServer, ServerRecieve) {
     } catch (const std::system_error& e) {
       std::puts("Server thread error");
       std::puts(e.what());
-      server_emit_error = true;
+      server_emit_error.store(true, std::memory_order_release);
     }
   });
+
+  const auto ready_deadline = std::chrono::steady_clock::now() + 2s;
+  while (!server_ready.load(std::memory_order_acquire) &&
+         !server_emit_error.load(std::memory_order_acquire) &&
+         std::chrono::steady_clock::now() < ready_deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
+  if (!server_ready.load(std::memory_order_acquire)) {
+    if (th.joinable()) {
+      th.join();
+    }
+    FAIL() << "Server did not become ready to accept connections.";
+  }
 
   std::string port_str = std::to_string(port);
   TCPClient client("localhost", port_str);
@@ -202,15 +219,24 @@ TEST(TcpClientServer, ServerRecieve) {
     }
     mes_size_sent += mes_size;
   }
-  std::this_thread::sleep_for(100ms);  // Give server time to process.
-
+  const auto receive_deadline = std::chrono::steady_clock::now() + 2s;
+  while (server_received.load(std::memory_order_acquire) < TEST_BUFFER_SIZE &&
+         std::chrono::steady_clock::now() < receive_deadline) {
+    std::this_thread::sleep_for(1ms);
+  }
+  const bool received_all =
+      server_received.load(std::memory_order_acquire) == TEST_BUFFER_SIZE;
   server_stop.store(true, std::memory_order_release);
-  EXPECT_EQ(server_recv_buf, msg);
-
+  if (!received_all) {
+    (void)client.Shutdown();
+  }
   if (th.joinable()) {
     th.join();
   }
-  EXPECT_FALSE(server_emit_error)
+
+  EXPECT_TRUE(received_all) << "Server did not receive the complete message.";
+  EXPECT_EQ(server_recv_buf, msg);
+  EXPECT_FALSE(server_emit_error.load(std::memory_order_acquire))
       << "Server thread emitted an error during execution.";
 }
 

@@ -150,7 +150,7 @@ TEST(TransactionDatabaseTest, ConcurrentAcquireReturnsUniqueIds) {
 }
 
 TEST(TransactionDatabaseTest, InvalidRangesCreateSafeEmptyDatabase) {
-  for (const auto [minimum, maximum] : {std::pair<uint16_t, uint16_t>{6, 5}}) {
+  for (const auto& [minimum, maximum] : {std::pair<uint16_t, uint16_t>{6, 5}}) {
     spw_rmap::TransactionDatabase db(minimum, maximum);
 
     auto result = db.Acquire();

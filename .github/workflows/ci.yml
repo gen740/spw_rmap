@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtest-dev ninja-build
+        run: sudo apt-get update && sudo apt-get install -y libgmock-dev libgtest-dev ninja-build
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libgtest-dev ninja-build
+        run: sudo apt-get update && sudo apt-get install -y libgmock-dev libgtest-dev ninja-build
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
@@ -51,12 +51,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang libgtest-dev ninja-build
+        run: sudo apt-get update && sudo apt-get install -y libgmock-dev libgtest-dev ninja-build
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_CXX_COMPILER=clang++
           -DSPWRMAP_ENABLE_TSAN=ON
           -DSPWRMAP_BUILD_APPS=OFF
           -DSPWRMAP_BUILD_TESTS=ON
@@ -70,12 +69,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y clang ninja-build
+        run: >-
+          sudo add-apt-repository --yes ppa:ubuntu-toolchain-r/test &&
+          sudo apt-get update &&
+          sudo apt-get install -y clang g++-14 ninja-build
       - name: Configure
         run: >-
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Debug
           -DCMAKE_CXX_COMPILER=clang++
+          '-DCMAKE_CXX_FLAGS=--gcc-install-dir=/usr/lib/gcc/x86_64-linux-gnu/14 -D__cpp_concepts=202002L -Wno-builtin-macro-redefined'
           -DSPWRMAP_BUILD_APPS=OFF
           -DSPWRMAP_BUILD_FUZZERS=ON
       - name: Build
