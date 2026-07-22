@@ -2,6 +2,30 @@
 
 `spw_rmap` is a SpaceWire/RMAP helper library that provides packet builders/parsers, a TCP transport, CLI utilities, and Python bindings.
 
+## Quick start
+
+The library requires a C++23 compiler and CMake 3.20 or newer.  Build the
+default library and command-line tools with:
+
+```bash
+cmake -S . -B build
+cmake --build build
+```
+
+This project also provides a Nix development shell with the supported build,
+test, Python, and formatting tools:
+
+```bash
+nix develop
+```
+
+For a ready-made Debug build with the test suite, examples, applications, and
+Python bindings enabled, run:
+
+```bash
+nix run .#build
+```
+
 ## Building
 
 ```bash
@@ -17,6 +41,21 @@ Key CMake options:
 - `SPWRMAP_BUILD_FUZZERS` (default `OFF`): build Clang/libFuzzer targets with AddressSanitizer and UBSan instrumentation.
 - `SPWRMAP_ENABLE_TSAN` (default `OFF`): instrument the library and tests with ThreadSanitizer using Clang or GCC.
 - `SPWRMAP_BUILD_PYTHON_BINDINGS` (default `OFF`): build the pybind11 module (also enabled when using `pyproject.toml` / `scikit-build-core`).
+
+To install the C++ library and CMake package configuration to a prefix:
+
+```bash
+cmake -S . -B build -DCMAKE_INSTALL_PREFIX="$PWD/install"
+cmake --build build
+cmake --install build
+```
+
+Downstream CMake projects can then use the exported target:
+
+```cmake
+find_package(spw_rmap CONFIG REQUIRED)
+target_link_libraries(my_application PRIVATE spw_rmap::spw_rmap)
+```
 
 ## Testing
 
@@ -52,7 +91,7 @@ TSAN_OPTIONS=halt_on_error=1 \
   ctest --test-dir build-tsan --output-on-failure
 ```
 
-ThreadSanitizer runtime support depends on the compiler and operating system; CI runs this configuration with Clang on Linux.
+ThreadSanitizer runtime support depends on the compiler and operating system; CI exercises this configuration on Linux.
 
 To build and run the RMAP packet-parser fuzzer:
 
@@ -282,17 +321,15 @@ To stop a background `RunLoop()`, call `Stop()`, join the loop thread, and then 
 
 - Asynchronous callbacks run inside the polling loop. If a function you pass to `WriteAsync` / `ReadAsync` throws, the library catches and logs the exception so the loop stays alive—wrap your callback body in your own error handling if you need to mark the operation successful despite local issues.
 
-Python bindings currently offer only synchronous `read`/`write` methods, do not release the GIL around blocking I/O, and provide no built-in async wrapper.
+Python bindings offer synchronous `read`/`write` methods that release the GIL during blocking I/O, allowing other Python threads to execute concurrently. Timeouts can be configured per call (default 100 ms). No built-in `asyncio` wrapper is provided yet.
 
 ## Known limitations
 
-- Python read/write timeouts are currently fixed at 100 ms, and the binding does not expose an explicit `shutdown()` method or context-manager protocol. Destruction closes the socket.
-- Synchronous C++ `Read` / `Write` do not convert a non-zero RMAP reply status into an error. In auto-polling mode they validate the expected transaction ID and reply type, and `Read` also validates the data length. With auto-polling off, dispatch is matched by transaction ID, but the internal sync callback does not fully validate reply type/status; `Read` validates the returned data length. Async users receive the `Packet` and should inspect type, status, and length themselves.
-- Automatic client reconnection does not fail or clear transactions belonging to the old connection. Their asynchronous callbacks can remain pending until lazy transaction-ID reclamation, and a request submitted concurrently with descriptor replacement is not yet protected by the normal send/receive locks.
+- The Python binding does not expose an explicit `shutdown()` method or context-manager protocol. Destruction closes the socket.
+- During automatic client reconnection, a request submitted concurrently with descriptor replacement is not yet protected by the normal send/receive locks. (Pending transactions from the old connection are correctly aborted with a network error).
 - `Packet` payload and address fields are non-owning spans into parser or receive buffers. Callbacks must copy data they need to retain after the callback returns.
 - `ParseRMAPPacket` verifies packet size and CRCs but does not yet reject every invalid instruction combination or the non-zero reserved byte in a read reply. In particular, read-modify-write command codes are currently classified as reads instead of being rejected as unsupported.
 - The internal `TCPServer` backend requires its owner to serialize accept, send, receive, and shutdown calls. In addition, generated replies do not yet preserve all command header fields: logical-address fields are swapped, instruction mode/address-length bits are not copied, and an all-zero padded reply address is decoded as an empty path rather than the required single zero byte.
 - Span and initializer-list address setters on `TargetNode` require the caller to respect the 12-byte limit; this is enforced by an assertion in debug builds.
-- CI uses loopback TCP peers and synthetic RMAP frames. Hardware-in-the-loop coverage is not yet included.
 
 The [examples](examples) directory contains CLI programs that parse command-line arguments, manage the lifecycle for you, and show additional patterns (speed tests, multi-target setups, etc.).

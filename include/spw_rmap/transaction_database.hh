@@ -98,6 +98,24 @@ class TransactionDatabase {
     return true;
   }
 
+  auto FailAll(std::error_code ec) noexcept -> void {
+    std::vector<Callback> callbacks;
+    {
+      std::lock_guard<std::mutex> lock(mutex_);
+      for (auto& entry : entries_) {
+        if (!entry.available && entry.callback) {
+          callbacks.push_back(std::move(entry.callback));
+          entry.Clear();
+        }
+      }
+    }
+    for (auto& cb : callbacks) {
+      if (cb) {
+        cb(std::unexpected(ec));
+      }
+    }
+  }
+
   auto Release(uint16_t transaction_id) noexcept -> void {
     std::lock_guard<std::mutex> lock(mutex_);
     auto* entry = GetEntry(transaction_id);

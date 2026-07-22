@@ -642,6 +642,7 @@ class SpwRmapTCPNodeImpl : public SpwRmapNodeBase {
         continue;
       }
       spw_rmap::debug::Debug("Error in poll(): ", res.error().message());
+      GetTransactionDatabase().FailAll(res.error());
       auto ensure_res = EnsureTcpConnection();
       if (!running_.load()) {
         break;

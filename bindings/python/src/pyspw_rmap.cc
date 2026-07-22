@@ -49,7 +49,8 @@ class PySpwRmapTCPNode {
   }
 
   auto Read(PyTargetNode target_node, uint32_t memory_adderss,
-            uint32_t data_length) -> std::vector<uint8_t> {
+            uint32_t data_length, std::chrono::milliseconds timeout = 100ms)
+      -> std::vector<uint8_t> {
     std::vector<uint8_t> data(data_length);
     if (target_node.reply_address.size() > spw_rmap::TargetNode::kMaxAddressLen)
         [[unlikely]] {
@@ -64,7 +65,11 @@ class PySpwRmapTCPNode {
         spw_rmap::TargetNode(target_node.logical_address)
             .SetTargetAddress(std::move(target_node.target_spacewire_address))
             .SetReplyAddress(std::move(target_node.reply_address));
-    auto res_read = node_.Read(spw_target_node, memory_adderss, data, 100ms);
+    std::expected<void, std::error_code> res_read;
+    {
+      py::gil_scoped_release release;
+      res_read = node_.Read(spw_target_node, memory_adderss, data, timeout);
+    }
     if (!res_read) [[unlikely]] {
       throw std::system_error(res_read.error());
     }
@@ -72,7 +77,8 @@ class PySpwRmapTCPNode {
   }
 
   void Write(PyTargetNode target_node, uint32_t memory_adderss,
-             const std::vector<uint8_t>& data) {
+             const std::vector<uint8_t>& data,
+             std::chrono::milliseconds timeout = 100ms) {
     if (target_node.target_spacewire_address.size() >
         spw_rmap::TargetNode::kMaxAddressLen) [[unlikely]] {
       throw std::out_of_range("Target address length exceeds maximum allowed.");
@@ -86,7 +92,11 @@ class PySpwRmapTCPNode {
         spw_rmap::TargetNode(target_node.logical_address)
             .SetTargetAddress(std::move(target_node.target_spacewire_address))
             .SetReplyAddress(std::move(target_node.reply_address));
-    auto res_write = node_.Write(spw_target_node, memory_adderss, data, 100ms);
+    std::expected<void, std::error_code> res_write;
+    {
+      py::gil_scoped_release release;
+      res_write = node_.Write(spw_target_node, memory_adderss, data, timeout);
+    }
     if (!res_write) [[unlikely]] {
       throw std::system_error(res_write.error());
     }
@@ -117,9 +127,11 @@ PYBIND11_MODULE(_core, m) {
            py::arg("port"))
       .def("connect", &::PySpwRmapTCPNode::Connect, py::arg("timeout") = 500ms)
       .def("read", &PySpwRmapTCPNode::Read, py::arg("target_node"),
-           py::arg("memory_address"), py::arg("data_length"))
+           py::arg("memory_address"), py::arg("data_length"),
+           py::arg("timeout") = 100ms)
       .def("write", &PySpwRmapTCPNode::Write, py::arg("target_node"),
-           py::arg("memory_address"), py::arg("data"));
+           py::arg("memory_address"), py::arg("data"),
+           py::arg("timeout") = 100ms);
 
   m.def(
       "set_debug_enabled",
