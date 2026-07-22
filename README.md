@@ -325,10 +325,8 @@ Python bindings offer synchronous `read`/`write` methods that release the GIL du
 
 ## Known limitations
 
-- The Python binding does not expose an explicit `shutdown()` method or context-manager protocol. Destruction closes the socket.
 - During automatic client reconnection, a request submitted concurrently with descriptor replacement is not yet protected by the normal send/receive locks. (Pending transactions from the old connection are correctly aborted with a network error).
 - `Packet` payload and address fields are non-owning spans into parser or receive buffers. Callbacks must copy data they need to retain after the callback returns.
-- `ParseRMAPPacket` verifies packet size and CRCs but does not yet reject every invalid instruction combination or the non-zero reserved byte in a read reply. In particular, read-modify-write command codes are currently classified as reads instead of being rejected as unsupported.
 - The internal `TCPServer` backend requires its owner to serialize accept, send, receive, and shutdown calls. In addition, generated replies do not yet preserve all command header fields: logical-address fields are swapped, instruction mode/address-length bits are not copied, and an all-zero padded reply address is decoded as an empty path rather than the required single zero byte.
 - Span and initializer-list address setters on `TargetNode` require the caller to respect the 12-byte limit; this is enforced by an assertion in debug builds.
 

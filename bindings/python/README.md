@@ -23,20 +23,19 @@ target = TargetNode(
     reply_address=[0x01, 0x03],
 )
 
-node = SpwRmapTCPNode(ip_address="192.168.1.100", port="10030")
-node.connect()
-
-node.write(target, 0x44A200D4, [0, 0, 0, 1])
-data = node.read(target, 0x44A200D0, 4)
-print(list(data))
+with SpwRmapTCPNode(ip_address="192.168.1.100", port="10030") as node:
+    node.connect()
+    node.write(target, 0x44A200D4, [0, 0, 0, 1])
+    data = node.read(target, 0x44A200D0, 4)
+    print(list(data))
 ```
 
 - `TargetNode` represents the destination node (logical address, hop list, and return path).
 - `SpwRmapTCPNode` owns the SpaceWire-over-TCP connection and performs the request/reply handshake.
-- Calls are synchronous: they block until a reply frame is parsed or the default timeout elapses. Catch the raised exception to handle transport or timeout errors explicitly.
-- Blocking calls currently keep the Python GIL; the binding does not provide an asyncio or parallel-thread wrapper.
+- Calls are synchronous: they block until a reply frame is parsed or the default 100 ms timeout elapses. Pass `timeout=` to `read` or `write` to override it. Catch the raised exception to handle transport or timeout errors explicitly.
+- Blocking calls release the Python GIL, so other Python threads can run while a request is in flight. The binding does not provide an `asyncio` wrapper.
 
-Destroy the node (or let it go out of scope) to close the TCP connection. The current Python binding does not expose an explicit `shutdown()` method or context-manager protocol.
+Call `disconnect()` to close the TCP connection explicitly, or use the context manager as shown above. Destruction also closes the connection.
 
 ## Building from source
 
@@ -56,4 +55,4 @@ After installing the checkout, run the binding smoke tests with:
 python -m unittest tests/test_python_bindings.py
 ```
 
-These tests cover module import, target-node field conversion, client construction, and the debug-control functions. They do not require a SpaceWire-over-TCP server.
+These tests cover module import, target-node field conversion, client construction and context management, and the debug-control functions. They do not require a SpaceWire-over-TCP server.

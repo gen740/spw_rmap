@@ -2,14 +2,11 @@
 #include <pybind11/stl.h>
 
 #include <atomic>
-#include <exception>
-#include <mutex>
 #include <span>
 #include <spw_rmap/internal/debug.hh>
 #include <spw_rmap/spw_rmap_node_base.hh>
 #include <spw_rmap/spw_rmap_tcp_node.hh>
 #include <spw_rmap/target_node.hh>
-#include <thread>
 
 #include "span_caster.hh"
 
@@ -44,6 +41,17 @@ class PySpwRmapTCPNode {
   auto Connect(std::chrono::milliseconds timeout = 500ms) -> void {
     auto res = node_.Connect(timeout);
     if (!res.has_value()) [[unlikely]] {
+      throw std::system_error(res.error());
+    }
+    connected_.store(true, std::memory_order_release);
+  }
+
+  auto Disconnect() -> void {
+    if (!connected_.exchange(false, std::memory_order_acq_rel)) {
+      return;
+    }
+    auto res = node_.Shutdown();
+    if (!res && res.error() != std::errc::bad_file_descriptor) [[unlikely]] {
       throw std::system_error(res.error());
     }
   }
@@ -104,10 +112,6 @@ class PySpwRmapTCPNode {
 
  private:
   spw_rmap::SpwRmapTCPClient node_;
-  std::thread thread_;
-  std::mutex thread_error_mtx_;
-  std::exception_ptr thread_error_ = nullptr;
-  std::atomic<bool> running_{false};
   std::atomic<bool> connected_{false};
 };
 
@@ -126,6 +130,13 @@ PYBIND11_MODULE(_core, m) {
       .def(py::init<std::string, std::string>(), py::arg("ip_address"),
            py::arg("port"))
       .def("connect", &::PySpwRmapTCPNode::Connect, py::arg("timeout") = 500ms)
+      .def("disconnect", &::PySpwRmapTCPNode::Disconnect)
+      .def(
+          "__enter__",
+          [](PySpwRmapTCPNode& self) -> PySpwRmapTCPNode& { return self; },
+          py::return_value_policy::reference_internal)
+      .def("__exit__", [](PySpwRmapTCPNode& self, py::object, py::object,
+                          py::object) { self.Disconnect(); })
       .def("read", &PySpwRmapTCPNode::Read, py::arg("target_node"),
            py::arg("memory_address"), py::arg("data_length"),
            py::arg("timeout") = 100ms)

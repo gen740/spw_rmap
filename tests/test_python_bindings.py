@@ -27,6 +27,11 @@ class PythonBindingsSmokeTest(unittest.TestCase):
         client = spw.SpwRmapTCPNode("127.0.0.1", "10030")
         self.assertIsNotNone(client)
 
+    def test_client_context_manager_returns_the_client(self) -> None:
+        client = spw.SpwRmapTCPNode("127.0.0.1", "10030")
+        with client as managed_client:
+            self.assertIs(managed_client, client)
+
 
 if __name__ == "__main__":
     unittest.main()

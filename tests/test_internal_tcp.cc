@@ -68,6 +68,17 @@ static void close_fd_retry(int fd) {
   } while (r < 0 && errno == EINTR);
 }
 
+static auto connect_with_retry(TCPClient& client,
+                               std::chrono::steady_clock::time_point deadline)
+    -> std::expected<void, std::error_code> {
+  auto result = client.Connect(100ms);
+  while (!result && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(1ms);
+    result = client.Connect(100ms);
+  }
+  return result;
+}
+
 TEST(TcpClient, DisconnectedOperationsReturnStableErrors) {
   TCPClient client("127.0.0.1", "1");
   std::array<uint8_t, 1> byte{0x42};
@@ -139,18 +150,19 @@ TEST(TcpClientServer, ServerRecieve) {
   }
 
   std::atomic<bool> server_stop{false};
-  std::atomic<bool> server_ready{false};
   std::atomic_size_t server_received{0};
   std::vector<uint8_t> server_recv_buf;
 
   server_recv_buf.resize(TEST_BUFFER_SIZE);
   std::atomic<bool> server_emit_error{false};
+  std::promise<TCPServer*> server_promise;
+  auto server_future = server_promise.get_future();
 
   std::thread th([&]() -> void {
     try {
       std::string port_str = std::to_string(port);
       TCPServer server("127.0.0.1", port_str);
-      server_ready.store(true, std::memory_order_release);
+      server_promise.set_value(&server);
       auto res = server.AcceptOnce();
       if (!res.has_value()) {
         FAIL() << "Failed to accept connection: " << res.error().message();
@@ -179,23 +191,15 @@ TEST(TcpClientServer, ServerRecieve) {
     }
   });
 
-  const auto ready_deadline = std::chrono::steady_clock::now() + 2s;
-  while (!server_ready.load(std::memory_order_acquire) &&
-         !server_emit_error.load(std::memory_order_acquire) &&
-         std::chrono::steady_clock::now() < ready_deadline) {
-    std::this_thread::sleep_for(1ms);
-  }
-  if (!server_ready.load(std::memory_order_acquire)) {
-    if (th.joinable()) {
-      th.join();
-    }
-    FAIL() << "Server did not become ready to accept connections.";
-  }
+  ASSERT_EQ(server_future.wait_for(2s), std::future_status::ready);
+  auto* server = server_future.get();
 
   std::string port_str = std::to_string(port);
   TCPClient client("localhost", port_str);
-  auto res = client.Connect(500ms);
+  auto res = connect_with_retry(client, std::chrono::steady_clock::now() + 2s);
   if (!res.has_value()) {
+    (void)server->Shutdown();
+    th.join();
     FAIL() << "Failed to connect to server: " << res.error().message();
   }
 
@@ -252,18 +256,19 @@ TEST(TcpClientServer, ClientRecieve) {
     throw;
   }
 
-  std::atomic<bool> server_stop{false};
-
   std::vector<uint8_t> msg;
   msg.resize(TEST_BUFFER_SIZE);
   for (auto& byte : msg) {
     byte = static_cast<uint8_t>(std::uniform_int_distribution<>(0, 255)(rng));
   }
-  bool server_emit_error = false;
+  std::atomic<bool> server_emit_error{false};
+  std::promise<TCPServer*> server_promise;
+  auto server_future = server_promise.get_future();
   std::thread th([&]() -> void {
     try {
       std::string port_str = std::to_string(port);
       TCPServer server("127.0.0.1", port_str);
+      server_promise.set_value(&server);
       auto res = server.AcceptOnce();
       if (!res.has_value()) {
         FAIL() << "Failed to accept connection: " << res.error().message();
@@ -284,14 +289,18 @@ TEST(TcpClientServer, ClientRecieve) {
     } catch (const std::system_error& e) {
       std::puts("Server thread error");
       std::puts(e.what());
-      server_emit_error = true;
+      server_emit_error.store(true, std::memory_order_release);
     }
   });
 
+  ASSERT_EQ(server_future.wait_for(2s), std::future_status::ready);
+  auto* server = server_future.get();
   std::string port_str = std::to_string(port);
   TCPClient client("localhost", port_str);
-  auto res = client.Connect(500ms);
+  auto res = connect_with_retry(client, std::chrono::steady_clock::now() + 2s);
   if (!res.has_value()) {
+    (void)server->Shutdown();
+    th.join();
     FAIL() << "Failed to connect to server: " << res.error().message();
   }
   std::vector<uint8_t> client_recv_buf;
@@ -312,12 +321,11 @@ TEST(TcpClientServer, ClientRecieve) {
       break;
     }
   }
-  server_stop.store(true, std::memory_order_release);
   EXPECT_EQ(msg, client_recv_buf);
   if (th.joinable()) {
     th.join();
   }
-  EXPECT_FALSE(server_emit_error)
+  EXPECT_FALSE(server_emit_error.load(std::memory_order_acquire))
       << "Server thread emitted an error during execution.";
 }
 

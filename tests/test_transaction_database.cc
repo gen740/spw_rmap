@@ -77,6 +77,27 @@ TEST(TransactionDatabaseTest, TimeoutInvokesCallbackWithError) {
   EXPECT_TRUE(timed_out.load());
 }
 
+TEST(TransactionDatabaseTest, FailAllInvokesCallbacksAndReleasesIds) {
+  spw_rmap::TransactionDatabase db(0x40, 0x41);
+  std::atomic<int> callback_count{0};
+  const auto network_error =
+      std::make_error_code(std::errc::network_unreachable);
+
+  for (int i = 0; i < 2; ++i) {
+    ASSERT_TRUE(db.Acquire([&](auto result) -> void {
+                    ASSERT_FALSE(result.has_value());
+                    EXPECT_EQ(result.error(), network_error);
+                    ++callback_count;
+                  }).has_value());
+  }
+
+  db.FailAll(network_error);
+
+  EXPECT_EQ(callback_count.load(), 2);
+  EXPECT_TRUE(db.Acquire().has_value());
+  EXPECT_TRUE(db.Acquire().has_value());
+}
+
 TEST(TransactionDatabaseTest, ExhaustionReturnsResourceUnavailable) {
   spw_rmap::TransactionDatabase db(0x10, 0x13);
 
